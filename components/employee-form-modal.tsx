@@ -200,6 +200,14 @@ export default function EmployeeFormModal({ isOpen, employee, onClose, onSave }:
   }
 
   const handleAddRegularShift = () => {
+    // Only allow adding if there's no regular shift yet
+    if ((formData.regularShifts || []).length >= 1) {
+      setApiError("Maximum Regular Shifts")
+      setValidationMessages(["Only 1 regular shift is allowed per employee."])
+      setShowValidationDialog(true)
+      return
+    }
+
     const newShift = {
       id: `reg-${Date.now()}`,
       shiftId: "", // Added shiftId field
@@ -550,7 +558,7 @@ export default function EmployeeFormModal({ isOpen, employee, onClose, onSave }:
 
       const isUpdate = !!employee
       const url = isUpdate
-        ? `http://43.205.117.239:8080/api/employees/updateEmployee/${employee.id}`
+        ? `/api/employees/updateEmployee/${employee.id}`
         : "http://43.205.117.239:8080/api/employees/addEmployee"
       const method = isUpdate ? "PUT" : "POST"
 
@@ -1114,8 +1122,7 @@ export default function EmployeeFormModal({ isOpen, employee, onClose, onSave }:
                               <SelectValue placeholder={!shift.amountType ? "Select Amount Type" : undefined} />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="Per Shift">Per Shift</SelectItem>
-                              <SelectItem value="Per Day">Per Day</SelectItem>
+                            
                               <SelectItem value="Per Hour">Per Hour</SelectItem>
                               <SelectItem value="Per Month">Per Month</SelectItem>
                             </SelectContent>
@@ -1170,7 +1177,12 @@ export default function EmployeeFormModal({ isOpen, employee, onClose, onSave }:
                     </div>
                   )
                 })}
-                <Button onClick={handleAddRegularShift} className="w-full">
+                <Button 
+                  onClick={handleAddRegularShift} 
+                  className="w-full"
+                  disabled={(formData.regularShifts || []).length >= 1}
+                  title={(formData.regularShifts || []).length >= 1 ? "Only 1 regular shift is allowed per employee" : ""}
+                >
                   <Plus size={16} className="mr-2" />
                   Add Regular Shift
                 </Button>
