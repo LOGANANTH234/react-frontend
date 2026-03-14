@@ -94,7 +94,7 @@ export function MonthlyPayrollScreen() {
         const month = String(selectedDate.getMonth() + 1).padStart(2, '0')
         const selectedMonth = `${year}-${month}`
         const response = await fetch(
-          `http://43.205.117.239:8080/api/payrolls/getMonthlySalary?month=${selectedMonth}`,
+          `http://3.109.152.136:8080/api/payrolls/getMonthlySalary?month=${selectedMonth}`,
           {
             headers: {
               Authorization: `Bearer ${auth.token}`,
@@ -155,7 +155,7 @@ export function MonthlyPayrollScreen() {
       const selectedMonth = `${year}-${month}`
 
       const response = await fetch(
-        `http://43.205.117.239:8080/api/payrolls/generateMonthlyPayroll?month=${selectedMonth}`,
+        `http://3.109.152.136:8080/api/payrolls/generateMonthlyPayroll?month=${selectedMonth}`,
         {
           method: "POST",
           headers: {
@@ -170,7 +170,7 @@ export function MonthlyPayrollScreen() {
 
       // Refresh data after generating
       const apiData: ApiResponse[] = await fetch(
-        `http://43.205.117.239:8080/api/payrolls/getMonthlySalary?month=${selectedMonth}`,
+        `http://3.109.152.136:8080/api/payrolls/getMonthlySalary?month=${selectedMonth}`,
         {
           headers: {
             Authorization: `Bearer ${auth.token}`,

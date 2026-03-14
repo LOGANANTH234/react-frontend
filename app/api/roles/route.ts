@@ -2,7 +2,7 @@ export async function GET(request: Request) {
   try {
     const authHeader = request.headers.get("Authorization")
 
-    const response = await fetch("http://43.205.117.239:8080/api/roles", {
+    const response = await fetch("http://3.109.152.136:8080/api/roles", {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     const authHeader = request.headers.get("Authorization")
     const body = await request.json()
 
-    const response = await fetch("http://43.205.117.239:8080/api/roles/create", {
+    const response = await fetch("http://3.109.152.136:8080/api/roles/create", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

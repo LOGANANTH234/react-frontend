@@ -450,7 +450,7 @@ export default function ViewEditPunchesScreen() {
       }
 
         const token = auth.token
-      const url = `http://43.205.117.239:8080/api/punch/delete/${punchId}`
+      const url = `http://3.109.152.136:8080/api/punch/delete/${punchId}`
       const response = await fetch(url, {
         method: 'DELETE',
         headers: {

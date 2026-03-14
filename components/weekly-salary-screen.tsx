@@ -88,7 +88,7 @@ export function WeeklySalaryScreen() {
       setError(null)
       try {
         const response = await fetch(
-          `http://43.205.117.239:8080/api/payrolls/getWeeklySalary?fromDate=${weekRange.start}&toDate=${weekRange.end}`,
+          `http://3.109.152.136:8080/api/payrolls/getWeeklySalary?fromDate=${weekRange.start}&toDate=${weekRange.end}`,
           {
             headers: {
               Authorization: `Bearer ${auth.token}`,
@@ -143,7 +143,7 @@ export function WeeklySalaryScreen() {
       const dateString = `${year}-${month}-${day}`
 
       const response = await fetch(
-        `http://43.205.117.239:8080/api/payrolls/GenerateWeeklySalary?anyDateInWeek=${dateString}`,
+        `http://3.109.152.136:8080/api/payrolls/GenerateWeeklySalary?anyDateInWeek=${dateString}`,
         {
           method: "POST",
           headers: {
@@ -158,7 +158,7 @@ export function WeeklySalaryScreen() {
 
       // Refresh data after generating
       const data = await fetch(
-        `http://43.205.117.239:8080/api/payrolls/getWeeklySalary?fromDate=${weekRange.start}&toDate=${weekRange.end}`,
+        `http://3.109.152.136:8080/api/payrolls/getWeeklySalary?fromDate=${weekRange.start}&toDate=${weekRange.end}`,
         {
           headers: {
             Authorization: `Bearer ${auth.token}`,
