@@ -191,14 +191,17 @@ export default function ViewEditPunchesScreen() {
   }
 
   const handleDateSelect = (date: Date) => {
-    const newDateStr = date.toISOString().split('T')[0]
+    const newDateStr = format(date, 'yyyy-MM-dd')
     setSelectedDate(newDateStr)
     setFilters(f => ({ ...f, customDate: newDateStr }))
     setIsCalendarOpen(false)
+    // Trigger server call after date selection
+    fetchPunchData(newDateStr)
   }
 
   // Convert selectedDate string to Date object for calendar
-  const selectedDateObj = new Date(selectedDate)
+  // Use startOfDay to handle timezone issues properly
+  const selectedDateObj = startOfDay(parseISO(selectedDate))
 
  const fetchPunchData = async (dateStr: string, showPageLoader = true) => {
   setIsLoading(true)
@@ -541,54 +544,58 @@ export default function ViewEditPunchesScreen() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">View & Edit Punches</h1>
-          <p className="text-muted-foreground mt-1">Manage employee punch records</p>
+          <p className="text-muted-foreground mt-1">Manage Employee Punch Records</p>
           {isReadOnly && <p className="text-sm text-amber-600 mt-2">View-only access. You cannot edit or save punch data.</p>}
         </div>
 
-        {/* Centered Date Header with Navigation */}
-        <div className="flex items-center justify-center gap-3 py-4 border-b border-slate-200 dark:border-slate-700">
-          <Button 
-            onClick={handlePreviousDay}
-            variant="ghost" 
-            size="sm" 
-            className="h-9 w-9 p-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
-            disabled={isLoading}
-          >
-            <ChevronLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-          </Button>
+        {/* Date Header with Navigation */}
+        <div className="flex items-center justify-between gap-3 py-4 border-b border-slate-200 dark:border-slate-700">
+          {/* Left side - Navigation and Calendar */}
+          <div className="flex items-center gap-3">
+            <Button 
+              onClick={handlePreviousDay}
+              variant="ghost" 
+              size="sm" 
+              className="h-9 w-9 p-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
+              disabled={isLoading}
+            >
+              <ChevronLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+            </Button>
 
-          <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-            <PopoverTrigger asChild>
-              <Button variant="ghost" className="gap-2 h-9 px-3 hover:bg-slate-100 dark:hover:bg-slate-800">
-                <CalendarIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-                <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">
-                  {format(selectedDateObj, 'EEEE, MMM dd, yyyy')}
-                </span>
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="center">
-              <MultiViewCalendar
-                selected={selectedDateObj}
-                onSelect={handleDateSelect}
-              />
-            </PopoverContent>
-          </Popover>
+            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" className="gap-2 h-9 px-3 hover:bg-slate-100 dark:hover:bg-slate-800">
+                  <CalendarIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+                  <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">
+                    {format(selectedDateObj, 'EEEE, MMM dd, yyyy')}
+                  </span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="center">
+                <MultiViewCalendar
+                  selected={selectedDateObj}
+                  onSelect={handleDateSelect}
+                />
+              </PopoverContent>
+            </Popover>
 
-          <Button 
-            onClick={handleNextDay}
-            variant="ghost" 
-            size="sm" 
-            className="h-9 w-9 p-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
-            disabled={isLoading}
-          >
-            <ChevronRight className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-          </Button>
+            <Button 
+              onClick={handleNextDay}
+              variant="ghost" 
+              size="sm" 
+              className="h-9 w-9 p-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
+              disabled={isLoading}
+            >
+              <ChevronRight className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+            </Button>
+          </div>
 
+          {/* Right side - Refresh button */}
           <Button 
             onClick={handleLoadPunches}
             variant="outline" 
             size="sm" 
-            className="h-9 gap-2 ml-2 text-red-600 border-red-200 hover:bg-red-50 dark:text-red-500 dark:border-red-900 dark:hover:bg-slate-800"
+            className="h-9 gap-2 text-green-600 border-green-200 hover:bg-green-50 dark:text-green-500 dark:border-green-900 dark:hover:bg-slate-800"
           >
             <RefreshCw className="w-4 h-4" />
             <span className="text-sm">Refresh</span>
@@ -606,12 +613,19 @@ export default function ViewEditPunchesScreen() {
           </div>
         )}
 
-        <div className="grid grid-cols-12 gap-4 items-end">
+        {/* Labels row */}
+        <div className="flex items-center gap-3 mb-1.5">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-48">Employee</span>
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-48">Source</span>
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-24">Action</span>
+        </div>
+
+        {/* Inputs row */}
+        <div className="flex items-center gap-3">
           {/* Employee Filter */}
-          <div className="col-span-3">
-            <Label className="text-xs font-semibold mb-2 block">Employee</Label>
+          <div className="w-48">
             <Select value={filters.employeeName} onValueChange={(value) => setFilters(prev => ({ ...prev, employeeName: value }))}>
-              <SelectTrigger className="h-9">
+              <SelectTrigger className="h-9 text-sm w-full">
                 <SelectValue placeholder="Select Employee" />
               </SelectTrigger>
               <SelectContent>
@@ -623,36 +637,36 @@ export default function ViewEditPunchesScreen() {
           </div>
 
           {/* Source Filter */}
-          <div className="col-span-2">
-            <Label className="text-xs font-semibold mb-2 block">Source</Label>
+          <div className="w-48">
             <Select value={filters.source} onValueChange={(value) => setFilters(prev => ({ ...prev, source: value }))}>
-              <SelectTrigger className="h-9">
+              <SelectTrigger className="h-9 text-sm w-full">
                 <SelectValue placeholder="All Sources" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Sources</SelectItem>
                 <SelectItem value="HIKVISION">HIKVISION</SelectItem>
                 <SelectItem value="MANUAL">MANUAL</SelectItem>
+                <SelectItem value="HIKVISION_MANUAL">HIKVISION_MANUAL</SelectItem>
                 <SelectItem value="SYSTEM_AUTO">SYSTEM_AUTO</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {/* Action Buttons */}
-          <div className="col-span-7 flex gap-2 justify-end">
-            {canEditPunches && (
-              <>
-                <Button onClick={() => setIsAddModalOpen(true)} variant="outline" className="h-9 gap-1" disabled={isSelectedDateToday()}>
-                  <Plus className="w-3 h-3" />
-                  Add
-                </Button>
-                <Button onClick={handleResetChanges} variant="destructive" className="h-9 gap-1" disabled={isSelectedDateToday()}>
-                  <RefreshCw className="w-3 h-3" />
-                  Reset
-                </Button>
-              </>
-            )}
-          </div>
+          {/* Add Button */}
+          {canEditPunches && (
+            <Button onClick={() => setIsAddModalOpen(true)} variant="outline" className="h-9 gap-1 text-sm px-3 whitespace-nowrap" disabled={isSelectedDateToday()}>
+              <Plus className="w-3 h-3" />
+              Add
+            </Button>
+          )}
+
+          {/* Reset Button */}
+          {canEditPunches && (
+            <Button onClick={handleResetChanges} variant="destructive" className="h-9 gap-1 text-sm px-3 whitespace-nowrap" disabled={isSelectedDateToday()}>
+              <RefreshCw className="w-3 h-3" />
+              Reset
+            </Button>
+          )}
         </div>
       </Card>
 
@@ -667,6 +681,7 @@ export default function ViewEditPunchesScreen() {
             <TableHeader>
               <TableRow className="bg-gray-50">
                 <TableHead>Employee</TableHead>
+                <TableHead>Date</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Time</TableHead>
                 <TableHead>Source</TableHead>
@@ -677,6 +692,7 @@ export default function ViewEditPunchesScreen() {
               {filteredPunches.map(punch => (
                 <TableRow key={punch.id}>
                   <TableCell className="font-medium">{punch.employeeName}</TableCell>
+                  <TableCell className="text-sm">{punch.date ? format(parseISO(punch.date), 'MMM dd, yyyy') : 'N/A'}</TableCell>
                   <TableCell>
                     <span className={`px-2 py-1 rounded text-xs font-semibold ${
                       punch.type === 'IN'

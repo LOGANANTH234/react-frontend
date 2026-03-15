@@ -558,7 +558,7 @@ export default function EmployeeFormModal({ isOpen, employee, onClose, onSave }:
 
       const isUpdate = !!employee
       const url = isUpdate
-        ? `/api/employees/updateEmployee/${employee.id}`
+        ? `http://3.109.152.136:8080/api/employees/updateEmployee/${employee.id}`
         : "http://3.109.152.136:8080/api/employees/addEmployee"
       const method = isUpdate ? "PUT" : "POST"
 
