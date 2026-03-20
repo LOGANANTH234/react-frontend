@@ -28,7 +28,7 @@ export async function POST(
 
     // Forward to backend API
     const response = await fetch(
-      `http://localhost:8080/api/punch/${id}`,
+      `http://3.109.152.136/api/punch/${id}`,
       {
         method: 'POST',
         headers: {

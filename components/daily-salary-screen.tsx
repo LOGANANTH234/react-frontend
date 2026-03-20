@@ -92,7 +92,7 @@ export function DailySalaryScreen() {
         const dateString = `${year}-${month}-${day}`
 
         const response = await fetch(
-          `http://localhost:8080/api/payrolls/getDailySalary?date=${dateString}`,
+          `http://3.109.152.136/api/payrolls/getDailySalary?date=${dateString}`,
           {
             headers: {
               Authorization: `Bearer ${auth.token}`,
@@ -148,7 +148,7 @@ export function DailySalaryScreen() {
       const dateString = `${year}-${month}-${day}`
 
       const response = await fetch(
-        `http://localhost:8080/api/payrolls/calculate-daily-salary?date=${dateString}`,
+        `http://3.109.152.136/api/payrolls/calculate-daily-salary?date=${dateString}`,
         {
           method: "POST",
           headers: {
@@ -163,7 +163,7 @@ export function DailySalaryScreen() {
 
       // Refresh data after generating
       const apiData: ApiResponse[] = await fetch(
-        `http://localhost:8080/api/payrolls/getDailySalary?date=${dateString}`,
+        `http://3.109.152.136/api/payrolls/getDailySalary?date=${dateString}`,
         {
           headers: {
             Authorization: `Bearer ${auth.token}`,

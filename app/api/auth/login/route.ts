@@ -7,7 +7,7 @@ import { type NextRequest, NextResponse } from "next/server"
  * In production, set  API_BASE_URL=http://your-server:8080  in .env.local
  * (server-side env var — no NEXT_PUBLIC_ needed here).
  */
-const BACKEND = process.env.API_BASE_URL ?? "http://localhost:8080"
+const BACKEND = process.env.API_BASE_URL ?? "http://3.109.152.136"
 
 export async function POST(request: NextRequest) {
   try {
