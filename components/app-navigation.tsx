@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { FileText, Users, Calendar, Clock, UserCog, ChevronLeft, ChevronRight, ShieldCheck, Gift, ClipboardEdit, DollarSign } from "lucide-react"
+import { FileText, Users, Calendar, Clock, UserCog, ChevronLeft, ChevronRight, ShieldCheck, Gift, ClipboardEdit, DollarSign, AlertTriangle } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useHasModule, MODULES } from "@/lib/permission-utils"
 
@@ -131,6 +131,17 @@ export function AppNavigation() {
       activeBg: "bg-green-500",
       activeText: "text-white",
       hoverBg: "hover:bg-green-50",
+      hasAccess: hasSalary,
+    },
+    {
+      name: "Warnings",
+      href: "/warnings",
+      icon: AlertTriangle,
+      color: "text-amber-600",
+      bgColor: "bg-amber-100",
+      activeBg: "bg-amber-500",
+      activeText: "text-white",
+      hoverBg: "hover:bg-amber-50",
       hasAccess: hasSalary,
     },
   ]

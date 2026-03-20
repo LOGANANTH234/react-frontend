@@ -42,7 +42,7 @@ interface DailySalaryRecord {
   workDuration: string
   regularSalary: number
   OvertimeSalary: number
-  warningCount: boolean
+  warningCount: number
   penaltyMinutes: string
   penaltyAmountDeducted: number
   extraAllowance: number
@@ -57,7 +57,7 @@ interface ApiResponse {
   workDuration: string
   regularSalary: number
   OvertimeSalary: number
-  warningCount: boolean
+  warningCount: number
   penaltyMinutes: string
   penaltyAmountDeducted: number
   extraAllowance: number
@@ -92,7 +92,7 @@ export function DailySalaryScreen() {
         const dateString = `${year}-${month}-${day}`
 
         const response = await fetch(
-          `http://3.109.152.136:8080/api/payrolls/getDailySalary?date=${dateString}`,
+          `http://localhost:8080/api/payrolls/getDailySalary?date=${dateString}`,
           {
             headers: {
               Authorization: `Bearer ${auth.token}`,
@@ -148,7 +148,7 @@ export function DailySalaryScreen() {
       const dateString = `${year}-${month}-${day}`
 
       const response = await fetch(
-        `http://3.109.152.136:8080/api/payrolls/calculate-daily-salary?date=${dateString}`,
+        `http://localhost:8080/api/payrolls/calculate-daily-salary?date=${dateString}`,
         {
           method: "POST",
           headers: {
@@ -163,7 +163,7 @@ export function DailySalaryScreen() {
 
       // Refresh data after generating
       const apiData: ApiResponse[] = await fetch(
-        `http://3.109.152.136:8080/api/payrolls/getDailySalary?date=${dateString}`,
+        `http://localhost:8080/api/payrolls/getDailySalary?date=${dateString}`,
         {
           headers: {
             Authorization: `Bearer ${auth.token}`,
@@ -278,8 +278,8 @@ export function DailySalaryScreen() {
                       <td className="px-6 py-4 text-right text-slate-700 border-r border-slate-200">₹{record.regularSalary.toFixed(2)}</td>
                       <td className="px-6 py-4 text-right text-slate-700 border-r border-slate-200">₹{record.OvertimeSalary.toFixed(2)}</td>
                       <td className="px-6 py-4 text-center border-r border-slate-200">
-                        {record.warningCount ? (
-                          <Badge className="bg-amber-100 text-amber-800 border-amber-300">Yes</Badge>
+                        {record.warningCount > 0 ? (
+                          <Badge className="bg-amber-100 text-amber-800 border-amber-300">{record.warningCount}</Badge>
                         ) : (
                           <span className="text-slate-400">—</span>
                         )}

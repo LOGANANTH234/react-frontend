@@ -151,7 +151,11 @@ export default function ViewEditPunchesScreen() {
 
   const [selectedDate, setSelectedDate] = useState<string>(todayDate)
   const [apiPunchData, setApiPunchData] = useState<PunchData[]>([])
-  const [uniqueEmployeeNames, setUniqueEmployeeNames] = useState<string[]>([])
+
+  // Employee list fetched from /api/employees/getAllEmployees
+  const [employeeList, setEmployeeList] = useState<{ id: string; name: string }[]>([])
+  const [isEmployeesLoading, setIsEmployeesLoading] = useState(false)
+
   const [filters, setFilters] = useState<Filters>({
     employeeName: '',
     dateQuick: 'today',
@@ -170,6 +174,49 @@ export default function ViewEditPunchesScreen() {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
 
   const employees = mockEmployees
+
+  // Fetch employees using a confirmed valid token, then auto-select the first one
+  const fetchEmployees = async (token: string) => {
+    console.log('[v0] fetchEmployees triggered')
+    setIsEmployeesLoading(true)
+    try {
+      const response = await fetch('http://localhost:8080/api/employees/getAllEmployees', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+      console.log('[v0] fetchEmployees response status:', response.status)
+      if (!response.ok) throw new Error(`Failed to fetch employees: ${response.statusText}`)
+      const data = await response.json()
+      console.log('[v0] fetchEmployees raw data length:', data?.length)
+
+      const mapped = (data || [])
+        .map((emp: any) => ({
+          employeeId: emp.employeeId?.toString() || emp.id?.toString() || '',
+          name:
+            emp.name ||
+            emp.employeeName ||
+            (emp.firstName || emp.lastName
+              ? `${emp.firstName ?? ''} ${emp.lastName ?? ''}`.trim()
+              : ''),
+        }))
+        .filter((e: any) => e.name)
+        .sort((a: any, b: any) => a.name.localeCompare(b.name))
+
+      setEmployeeList(mapped)
+      console.log('[v0] employeeList set with', mapped.length, 'entries')
+
+      // ── Auto-select the first employee as the default filter ──────────────
+      if (mapped.length > 0) {
+        setFilters(prev => ({ ...prev, employeeName: mapped[0].name }))
+      }
+      // ──────────────────────────────────────────────────────────────────────
+    } catch (err) {
+      console.error('[v0] Error fetching employees:', err)
+    } finally {
+      setIsEmployeesLoading(false)
+    }
+  }
 
   // Date navigation handlers
   const handlePreviousDay = () => {
@@ -195,21 +242,19 @@ export default function ViewEditPunchesScreen() {
     setSelectedDate(newDateStr)
     setFilters(f => ({ ...f, customDate: newDateStr }))
     setIsCalendarOpen(false)
-    // Trigger server call after date selection
     fetchPunchData(newDateStr)
   }
 
   // Convert selectedDate string to Date object for calendar
-  // Use startOfDay to handle timezone issues properly
   const selectedDateObj = startOfDay(parseISO(selectedDate))
 
- const fetchPunchData = async (dateStr: string, showPageLoader = true) => {
-  setIsLoading(true)
-  if (showPageLoader) setIsPageLoading(true)
+  const fetchPunchData = async (dateStr: string, showPageLoader = true) => {
+    setIsLoading(true)
+    if (showPageLoader) setIsPageLoading(true)
     setError(null)
     try {
       if (!auth || !auth.token) {
-        console.log("[v0] No auth context or token available")
+        console.log('[v0] No auth context or token available')
         setError('Unauthorized – Please login again.')
         setIsLoading(false)
         return
@@ -217,20 +262,20 @@ export default function ViewEditPunchesScreen() {
 
       const token = auth.token
       const url = `/api/punch/${dateStr}`
-      console.log("[v0] Fetching from URL:", url)
+      console.log('[v0] Fetching from URL:', url)
       const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       })
 
-      console.log("[v0] Response status:", response.status, response.statusText)
+      console.log('[v0] Response status:', response.status, response.statusText)
       if (!response.ok) {
         throw new Error(`API error: ${response.statusText}`)
       }
 
       const data = await response.json()
-      console.log("[v0] API response data:", data)
+      console.log('[v0] API response data:', data)
 
       const punchesWithEmployeeNames: PunchData[] = (data || []).map((punch: any) => {
         const employeeId = punch.employeeId?.toString() || ''
@@ -249,23 +294,17 @@ export default function ViewEditPunchesScreen() {
 
       setApiPunchData(punchesWithEmployeeNames)
 
-      const uniqueNames = Array.from(new Set(punchesWithEmployeeNames.map(p => p.employeeName)))
-        .sort((a, b) => a.localeCompare(b))
-
-      setUniqueEmployeeNames(uniqueNames)
-
-      if (uniqueNames.length > 0) {
-        setFilters(prev => ({ ...prev, employeeName: uniqueNames[0] }))
-      } else {
-        setFilters(prev => ({ ...prev, employeeName: '' }))
+      // Fetch employees once using the same confirmed valid token.
+      // Only runs on first load (employeeList still empty).
+      if (employeeList.length === 0) {
+        fetchEmployees(token)
       }
+
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to fetch punch data'
-      console.log("[v0] Error fetching punch data:", errorMsg, err)
+      console.log('[v0] Error fetching punch data:', errorMsg, err)
       setError(errorMsg)
       setApiPunchData([])
-      setUniqueEmployeeNames([])
-      setFilters(prev => ({ ...prev, employeeName: '' }))
     } finally {
       setIsLoading(false)
       setIsPageLoading(false)
@@ -274,10 +313,10 @@ export default function ViewEditPunchesScreen() {
 
   useEffect(() => {
     if (auth && auth.token) {
-      console.log("[v0] Component mounted with auth, calling fetchPunchData with date:", todayDate)
+      console.log('[v0] Component mounted with auth, calling fetchPunchData with date:', todayDate)
       fetchPunchData(todayDate)
     } else if (auth === null) {
-      console.log("[v0] Auth loading complete but no token available")
+      console.log('[v0] Auth loading complete but no token available')
     }
   }, [auth])
 
@@ -355,6 +394,7 @@ export default function ViewEditPunchesScreen() {
     }))
   }
 
+  // Filter punches by selected employee name and source
   const filteredPunches = useMemo(() => {
     return apiPunchData.filter(punch => {
       if (filters.employeeName && punch.employeeName !== filters.employeeName) return false
@@ -379,7 +419,6 @@ export default function ViewEditPunchesScreen() {
       setApiPunchData(prev => [...prev, newPunch])
     } finally {
       setOperationLoading({ show: false, message: '' })
-      // Trigger refresh after a short delay
       setTimeout(() => fetchPunchData(selectedDate, false), 500)
     }
   }
@@ -414,7 +453,6 @@ export default function ViewEditPunchesScreen() {
       setIsAddModalOpen(false)
     } finally {
       setOperationLoading({ show: false, message: '' })
-      // Trigger refresh after a short delay
       setTimeout(() => fetchPunchData(selectedDate, false), 500)
     }
   }
@@ -448,12 +486,12 @@ export default function ViewEditPunchesScreen() {
 
     try {
       if (!auth || !auth.token) {
-        console.log("[v0] No auth context or token available for delete")
+        console.log('[v0] No auth context or token available for delete')
         throw new Error('Unauthorized – Please login again.')
       }
 
-        const token = auth.token
-      const url = `http://3.109.152.136:8080/api/punch/delete/${punchId}`
+      const token = auth.token
+      const url = `http://localhost:8080/api/punch/delete/${punchId}`
       const response = await fetch(url, {
         method: 'DELETE',
         headers: {
@@ -464,10 +502,10 @@ export default function ViewEditPunchesScreen() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => null)
         const errorMsg = errorData?.message || errorData?.validationMessages?.[0] || `Delete failed: ${response.statusText}`
-        console.log("[v0] Delete API error:", errorMsg)
+        console.log('[v0] Delete API error:', errorMsg)
         throw new Error(errorMsg)
       }
-      
+
       setApiPunchData(prev => prev.filter(p => p.id !== punchId))
       setIsDeleteModalOpen(false)
       setTimeout(() => fetchPunchData(selectedDate, false), 500)
@@ -517,7 +555,7 @@ export default function ViewEditPunchesScreen() {
     fetchPunchData(selectedDate)
   }
 
-  // ── PAGE LOADER — shown on initial load and date switches only ──────────────
+  // PAGE LOADER — shown on initial load and date switches only
   if (isPageLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex flex-col items-center justify-center">
@@ -537,7 +575,6 @@ export default function ViewEditPunchesScreen() {
       </div>
     )
   }
-  // ────────────────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6 p-6">
@@ -548,53 +585,50 @@ export default function ViewEditPunchesScreen() {
           {isReadOnly && <p className="text-sm text-amber-600 mt-2">View-only access. You cannot edit or save punch data.</p>}
         </div>
 
-        {/* Date Header with Navigation */}
-        <div className="flex items-center justify-between gap-3 py-4 border-b border-slate-200 dark:border-slate-700">
-          {/* Left side - Navigation and Calendar */}
-          <div className="flex items-center gap-3">
-            <Button 
-              onClick={handlePreviousDay}
-              variant="ghost" 
-              size="sm" 
-              className="h-9 w-9 p-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
-              disabled={isLoading}
-            >
-              <ChevronLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-            </Button>
+        {/* Date Header with Navigation — Refresh button moved next to calendar */}
+        <div className="flex items-center gap-3 py-4 border-b border-slate-200 dark:border-slate-700">
+          <Button
+            onClick={handlePreviousDay}
+            variant="ghost"
+            size="sm"
+            className="h-9 w-9 p-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
+            disabled={isLoading}
+          >
+            <ChevronLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+          </Button>
 
-            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" className="gap-2 h-9 px-3 hover:bg-slate-100 dark:hover:bg-slate-800">
-                  <CalendarIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-                  <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">
-                    {format(selectedDateObj, 'EEEE, MMM dd, yyyy')}
-                  </span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="center">
-                <MultiViewCalendar
-                  selected={selectedDateObj}
-                  onSelect={handleDateSelect}
-                />
-              </PopoverContent>
-            </Popover>
+          <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" className="gap-2 h-9 px-3 hover:bg-slate-100 dark:hover:bg-slate-800">
+                <CalendarIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+                <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">
+                  {format(selectedDateObj, 'EEEE, MMM dd, yyyy')}
+                </span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="center">
+              <MultiViewCalendar
+                selected={selectedDateObj}
+                onSelect={handleDateSelect}
+              />
+            </PopoverContent>
+          </Popover>
 
-            <Button 
-              onClick={handleNextDay}
-              variant="ghost" 
-              size="sm" 
-              className="h-9 w-9 p-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
-              disabled={isLoading}
-            >
-              <ChevronRight className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-            </Button>
-          </div>
+          <Button
+            onClick={handleNextDay}
+            variant="ghost"
+            size="sm"
+            className="h-9 w-9 p-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
+            disabled={isLoading}
+          >
+            <ChevronRight className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+          </Button>
 
-          {/* Right side - Refresh button */}
-          <Button 
+          {/* Refresh button — now inline next to calendar navigation */}
+          <Button
             onClick={handleLoadPunches}
-            variant="outline" 
-            size="sm" 
+            variant="outline"
+            size="sm"
             className="h-9 gap-2 text-green-600 border-green-200 hover:bg-green-50 dark:text-green-500 dark:border-green-900 dark:hover:bg-slate-800"
           >
             <RefreshCw className="w-4 h-4" />
@@ -622,15 +656,22 @@ export default function ViewEditPunchesScreen() {
 
         {/* Inputs row */}
         <div className="flex items-center gap-3">
-          {/* Employee Filter */}
+
+          {/* Employee Filter — no "All Employees" option, first employee auto-selected */}
           <div className="w-48">
-            <Select value={filters.employeeName} onValueChange={(value) => setFilters(prev => ({ ...prev, employeeName: value }))}>
+            <Select
+              value={filters.employeeName}
+              onValueChange={(value) => setFilters(prev => ({ ...prev, employeeName: value }))}
+              disabled={isEmployeesLoading}
+            >
               <SelectTrigger className="h-9 text-sm w-full">
-                <SelectValue placeholder="Select Employee" />
+                <SelectValue placeholder={isEmployeesLoading ? 'Loading...' : 'Select Employee'} />
               </SelectTrigger>
               <SelectContent>
-                {uniqueEmployeeNames.map(empName => (
-                  <SelectItem key={empName} value={empName}>{empName}</SelectItem>
+                {employeeList.map(emp => (
+                  <SelectItem key={emp.id} value={emp.name}>
+                    {emp.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -638,7 +679,10 @@ export default function ViewEditPunchesScreen() {
 
           {/* Source Filter */}
           <div className="w-48">
-            <Select value={filters.source} onValueChange={(value) => setFilters(prev => ({ ...prev, source: value }))}>
+            <Select
+              value={filters.source}
+              onValueChange={(value) => setFilters(prev => ({ ...prev, source: value }))}
+            >
               <SelectTrigger className="h-9 text-sm w-full">
                 <SelectValue placeholder="All Sources" />
               </SelectTrigger>
@@ -654,7 +698,12 @@ export default function ViewEditPunchesScreen() {
 
           {/* Add Button */}
           {canEditPunches && (
-            <Button onClick={() => setIsAddModalOpen(true)} variant="outline" className="h-9 gap-1 text-sm px-3 whitespace-nowrap" disabled={isSelectedDateToday()}>
+            <Button
+              onClick={() => setIsAddModalOpen(true)}
+              variant="outline"
+              className="h-9 gap-1 text-sm px-3 whitespace-nowrap"
+              disabled={isSelectedDateToday()}
+            >
               <Plus className="w-3 h-3" />
               Add
             </Button>
@@ -662,7 +711,12 @@ export default function ViewEditPunchesScreen() {
 
           {/* Reset Button */}
           {canEditPunches && (
-            <Button onClick={handleResetChanges} variant="destructive" className="h-9 gap-1 text-sm px-3 whitespace-nowrap" disabled={isSelectedDateToday()}>
+            <Button
+              onClick={handleResetChanges}
+              variant="destructive"
+              className="h-9 gap-1 text-sm px-3 whitespace-nowrap"
+              disabled={isSelectedDateToday()}
+            >
               <RefreshCw className="w-3 h-3" />
               Reset
             </Button>
@@ -692,7 +746,9 @@ export default function ViewEditPunchesScreen() {
               {filteredPunches.map(punch => (
                 <TableRow key={punch.id}>
                   <TableCell className="font-medium">{punch.employeeName}</TableCell>
-                  <TableCell className="text-sm">{punch.date ? format(parseISO(punch.date), 'MMM dd, yyyy') : 'N/A'}</TableCell>
+                  <TableCell className="text-sm">
+                    {punch.date ? format(parseISO(punch.date), 'MMM dd, yyyy') : 'N/A'}
+                  </TableCell>
                   <TableCell>
                     <span className={`px-2 py-1 rounded text-xs font-semibold ${
                       punch.type === 'IN'
@@ -753,9 +809,12 @@ export default function ViewEditPunchesScreen() {
         onAddPair={handleAddPunchPair}
         allPunches={apiPunchData}
         workDate={selectedDate}
-        employeeId={filters.employeeName
-          ? apiPunchData.find(p => p.employeeName === filters.employeeName)?.employeeId
-          : undefined}
+        employeeId={
+          filters.employeeName
+            ? employeeList.find(e => e.name === filters.employeeName)?.employeeId || 
+              apiPunchData.find(p => p.employeeName === filters.employeeName)?.employeeId
+            : undefined
+        }
         authToken={auth?.token}
         onRefresh={() => fetchPunchData(selectedDate, false)}
       />

@@ -52,6 +52,12 @@ export const ROUTE_CONFIG = {
   "/view-edit-punches": {
     requiredModule: MODULES.VIEW_EDIT_PUNCHES,
   },
+  "/warnings": {
+    requiredModule: MODULES.SALARY,
+  },
+  "/salary": {
+    requiredModule: MODULES.SALARY,
+  },
 } as const
 
 // Helper function to get required module for a route
