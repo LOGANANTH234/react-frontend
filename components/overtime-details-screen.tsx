@@ -52,7 +52,7 @@ export function OvertimeDetailsScreen() {
         const day = String(selectedDate.getDate()).padStart(2, '0')
         const dateString = `${year}-${month}-${day}`
         const response = await fetch(
-          `http://3.109.152.136/api/payrolls/getOvertTimeSalaryDetails?date=${dateString}`,
+          `http://3.109.152.136:3000/api/payrolls/getOvertTimeSalaryDetails?date=${dateString}`,
           {
             headers: {
               Authorization: `Bearer ${auth.token}`,

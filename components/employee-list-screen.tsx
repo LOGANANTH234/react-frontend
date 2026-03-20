@@ -110,7 +110,7 @@ export default function EmployeeListScreen() {
         cache.setError(null)
         setIsLoading(true)
         const token = localStorage.getItem("auth") ? JSON.parse(localStorage.getItem("auth")!).token : null
-        const response = await fetch("http://3.109.152.136/api/employees/getAllEmployees", {
+        const response = await fetch("http://3.109.152.136:3000/api/employees/getAllEmployees", {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
@@ -213,7 +213,7 @@ export default function EmployeeListScreen() {
 
     try {
       const token = localStorage.getItem("auth") ? JSON.parse(localStorage.getItem("auth")!).token : null
-      const response = await fetch(`http://3.109.152.136/api/employees/deleteEmployee/${id}`, {
+      const response = await fetch(`http://3.109.152.136:3000/api/employees/deleteEmployee/${id}`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
@@ -244,7 +244,7 @@ export default function EmployeeListScreen() {
     try {
       const apiStatus = newStatus === "Active" ? "ACTIVE" : "DEACTIVE"
       const token = localStorage.getItem("auth") ? JSON.parse(localStorage.getItem("auth")!).token : null
-      const response = await fetch(`http://3.109.152.136/api/employees/${id}/status?value=${apiStatus}`, {
+      const response = await fetch(`http://3.109.152.136:3000/api/employees/${id}/status?value=${apiStatus}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -275,7 +275,7 @@ export default function EmployeeListScreen() {
 
     try {
       const token = localStorage.getItem("auth") ? JSON.parse(localStorage.getItem("auth")!).token : null
-      const response = await fetch(`http://3.109.152.136/api/employees/${employee.id}/history`, {
+      const response = await fetch(`http://3.109.152.136:3000/api/employees/${employee.id}/history`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -313,7 +313,7 @@ export default function EmployeeListScreen() {
       setOperationLoading({ show: true, message: "Syncing photos", employeeName: "" })
 
       const token = localStorage.getItem("auth") ? JSON.parse(localStorage.getItem("auth")!).token : null
-      const response = await fetch("http://3.109.152.136/api/employees/sync-photos", {
+      const response = await fetch("http://3.109.152.136:3000/api/employees/sync-photos", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

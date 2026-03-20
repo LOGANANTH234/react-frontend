@@ -558,8 +558,8 @@ export default function EmployeeFormModal({ isOpen, employee, onClose, onSave }:
 
       const isUpdate = !!employee
       const url = isUpdate
-        ? `http://3.109.152.136/api/employees/updateEmployee/${employee.id}`
-        : "http://3.109.152.136/api/employees/addEmployee"
+        ? `http://3.109.152.136:3000/api/employees/updateEmployee/${employee.id}`
+        : "http://3.109.152.136:3000/api/employees/addEmployee"
       const method = isUpdate ? "PUT" : "POST"
 
       const token = localStorage.getItem("auth") ? JSON.parse(localStorage.getItem("auth")!).token : null

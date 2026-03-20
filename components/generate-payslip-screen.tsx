@@ -31,7 +31,7 @@ interface ApiEmployee {
   totalAmount: string
 }
 
-const BASE = "http://3.109.152.136/api/pdf"
+const BASE = "http://3.109.152.136:3000/api/pdf"
 
 export function GeneratePayslipScreen() {
   const [selectedEmployee, setSelectedEmployee]   = useState<string>("")

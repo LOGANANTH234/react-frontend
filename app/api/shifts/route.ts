@@ -2,7 +2,7 @@ export async function GET(request: Request) {
   try {
     const authHeader = request.headers.get("Authorization")
 
-    const backendUrl = "http://3.109.152.136/api/shifts"
+    const backendUrl = "http://3.109.152.136:3000/api/shifts"
 
     const response = await fetch(backendUrl, {
       method: "GET",
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
 
     console.log("[v0] Creating shift with body:", JSON.stringify(body, null, 2))
 
-    const response = await fetch("http://3.109.152.136/api/shifts", {
+    const response = await fetch("http://3.109.152.136:3000/api/shifts", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
