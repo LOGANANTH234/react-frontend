@@ -111,7 +111,7 @@ export function WarningsScreen() {
         const endDateString = `${endYear}-${endMonth}-${endDay}`
 
         const response = await fetch(
-          `http://3.109.152.136:3000/api/warnings/by-range?from=${startDateString}&to=${endDateString}`,
+          `http://3.109.152.136:8080/api/warnings/by-range?from=${startDateString}&to=${endDateString}`,
           {
             headers: {
               Authorization: `Bearer ${auth.token}`,

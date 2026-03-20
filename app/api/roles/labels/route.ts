@@ -2,7 +2,7 @@ export async function GET(request: Request) {
   try {
     const authHeader = request.headers.get("Authorization")
 
-    const response = await fetch("http://3.109.152.136:3000/api/roles/getAllRoleLabelList", {
+    const response = await fetch("http://3.109.152.136:8080/api/roles/getAllRoleLabelList", {
       method: "GET",
       headers: {
         "Content-Type": "application/json",

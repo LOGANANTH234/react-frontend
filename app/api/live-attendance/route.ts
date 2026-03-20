@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const response = await fetch('http://3.109.152.136:3000/api/live-attendance', {
+    const response = await fetch('http://3.109.152.136:8080/api/live-attendance', {
       method: 'GET',
       headers: {
         'Authorization': authHeader,
