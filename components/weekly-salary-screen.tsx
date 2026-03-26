@@ -82,7 +82,7 @@ export function WeeklySalaryScreen() {
     setLoading(true); setError(null)
     try {
       const res = await fetch(
-        `http://localhost:8080/api/payrolls/getWeeklySalary?fromDate=${range.start}&toDate=${range.end}`,
+        `http://3.109.152.136:8080/api/payrolls/getWeeklySalary?fromDate=${range.start}&toDate=${range.end}`,
         { headers: { Authorization: `Bearer ${auth.token}` } }
       )
       if (!res.ok) throw new Error(`API error: ${res.statusText}`)
@@ -102,7 +102,7 @@ export function WeeklySalaryScreen() {
     try {
       const d = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,"0")}-${String(selectedDate.getDate()).padStart(2,"0")}`
       const res = await fetch(
-        `http://localhost:8080/api/payrolls/GenerateWeeklySalary?anyDateInWeek=${d}`,
+        `http://3.109.152.136:8080/api/payrolls/GenerateWeeklySalary?anyDateInWeek=${d}`,
         { method: "POST", headers: { Authorization: `Bearer ${auth.token}` } }
       )
       if (!res.ok) throw new Error(`API error: ${res.statusText}`)

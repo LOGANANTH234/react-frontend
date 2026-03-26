@@ -125,7 +125,7 @@ interface WarningRow {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BASE = "http://localhost:8080"
+const BASE = "http://3.109.152.136:8080"
 
 function fmt(n: number | null | undefined) {
   if (n == null || isNaN(n)) return "₹0.00"
