@@ -1,29 +1,12 @@
 "use client"
 
 import { useState, useMemo, useEffect } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { AlertCircle, Loader2, CalendarIcon, Zap } from "lucide-react"
+import { Label } from "@/components/ui/label"
+import { AlertCircle, CalendarIcon, Zap } from "lucide-react"
 import { useAuth } from "@/lib/contexts/auth-context"
-import { getWeekStart, getWeekEnd, formatDateShort, getWeekRangeISO, formatDateISO } from "@/lib/date-week-utils"
+import { getWeekStart, getWeekEnd, formatDateShort, getWeekRangeISO } from "@/lib/date-week-utils"
 import { SearchableComboBox } from "./searchable-combo-box"
 import { MultiViewCalendar } from "./multi-view-calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -45,7 +28,7 @@ interface ApiWeeklySalaryRecord {
   netPay: number
   overtimeSalaryTotal: number
   penaltyAmount: number
-  penaltyTotal: number
+  penaltyTotal: string
   presentDays: number
   regularSalaryTotal: number
   warningTotal: number
@@ -54,10 +37,29 @@ interface ApiWeeklySalaryRecord {
   workingDays: number
 }
 
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function fmt(n: number | null | undefined): string {
+  if (n == null || isNaN(n)) return "₹0.00"
+  return `₹${n.toFixed(2)}`
+}
+
+function attendancePct(present: number, working: number): string {
+  if (!working) return "—"
+  return `${Math.round((present / working) * 100)}%`
+}
+
+function attendanceColor(present: number, working: number): string {
+  if (!working) return "text-gray-400"
+  const pct = (present / working) * 100
+  if (pct >= 90) return "text-green-600 font-semibold"
+  if (pct >= 70) return "text-amber-600 font-semibold"
+  return "text-red-500 font-semibold"
+}
+
 export function WeeklySalaryScreen() {
   const { auth } = useAuth()
   const [selectedEmployee, setSelectedEmployee] = useState("")
-  // Initialize with today's date to show current week
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [apiData, setApiData] = useState<ApiWeeklySalaryRecord[]>([])
@@ -65,161 +67,111 @@ export function WeeklySalaryScreen() {
   const [error, setError] = useState<string | null>(null)
   const [showGenerateDialog, setShowGenerateDialog] = useState(false)
 
-  // Calculate week from selected date
-  const weekRange = useMemo(() => {
-    return getWeekRangeISO(selectedDate)
-  }, [selectedDate])
+  const weekRange = useMemo(() => getWeekRangeISO(selectedDate), [selectedDate])
 
   const weekRangeDisplay = useMemo(() => {
-    const start = getWeekStart(selectedDate)
-    const end = getWeekEnd(selectedDate)
-    return `${formatDateShort(start)} → ${formatDateShort(end)}`
+    const s = getWeekStart(selectedDate)
+    const e = getWeekEnd(selectedDate)
+    return `${formatDateShort(s)} → ${formatDateShort(e)}`
   }, [selectedDate])
 
-  // Fetch data from API
-  useEffect(() => {
-    const fetchWeeklySalary = async () => {
-      if (!auth?.token) {
-        setError("Authentication token not available")
-        return
-      }
+  // ── fetch ─────────────────────────────────────────────────────────────────
 
-      setLoading(true)
-      setError(null)
-      try {
-        const response = await fetch(
-          `http://3.109.152.136:8080/api/payrolls/getWeeklySalary?fromDate=${weekRange.start}&toDate=${weekRange.end}`,
-          {
-            headers: {
-              Authorization: `Bearer ${auth.token}`,
-            },
-          }
-        )
-        if (!response.ok) {
-          throw new Error(`API error: ${response.statusText}`)
-        }
-        const data = await response.json()
-        setApiData(data)
-      } catch (err) {
-        console.error("[v0] Error fetching weekly salary:", err)
-        setError(err instanceof Error ? err.message : "Failed to fetch data")
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchWeeklySalary()
-  }, [weekRange, auth?.token])
-
-  // Filter data based on selected employee
-  const filteredData = apiData
-    .filter((record) => (selectedEmployee ? record.employeeName === selectedEmployee : true))
-
-  const employeeOptions = useMemo(() => {
-    const uniqueEmployees = Array.from(new Set(apiData.map((r) => r.employeeName)))
-    return [
-      { value: "", label: "All Employees" },
-      ...uniqueEmployees.map((emp) => ({ value: emp, label: emp }))
-    ]
-  }, [apiData])
-
-  const handleGenerateSalary = () => {
-    setShowGenerateDialog(true)
+  const fetchData = async (range: { start: string; end: string }) => {
+    if (!auth?.token) { setError("Authentication token not available"); return }
+    setLoading(true); setError(null)
+    try {
+      const res = await fetch(
+        `http://localhost:8080/api/payrolls/getWeeklySalary?fromDate=${range.start}&toDate=${range.end}`,
+        { headers: { Authorization: `Bearer ${auth.token}` } }
+      )
+      if (!res.ok) throw new Error(`API error: ${res.statusText}`)
+      setApiData(await res.json())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch data")
+    } finally { setLoading(false) }
   }
 
-  const handleConfirmGenerate = async () => {
-    if (!auth?.token) {
-      setError("Authentication token not available")
-      setShowGenerateDialog(false)
-      return
-    }
+  useEffect(() => { if (auth?.token) fetchData(weekRange) }, [weekRange, auth?.token])
 
+  // ── generate ──────────────────────────────────────────────────────────────
+
+  const handleConfirmGenerate = async () => {
+    if (!auth?.token) { setShowGenerateDialog(false); return }
     setLoading(true)
     try {
-      // Format date for API (YYYY-MM-DD)
-      const year = selectedDate.getFullYear()
-      const month = String(selectedDate.getMonth() + 1).padStart(2, '0')
-      const day = String(selectedDate.getDate()).padStart(2, '0')
-      const dateString = `${year}-${month}-${day}`
-
-      const response = await fetch(
-        `http://3.109.152.136:8080/api/payrolls/GenerateWeeklySalary?anyDateInWeek=${dateString}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${auth.token}`,
-          },
-        }
+      const d = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,"0")}-${String(selectedDate.getDate()).padStart(2,"0")}`
+      const res = await fetch(
+        `http://localhost:8080/api/payrolls/GenerateWeeklySalary?anyDateInWeek=${d}`,
+        { method: "POST", headers: { Authorization: `Bearer ${auth.token}` } }
       )
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.statusText}`)
-      }
-
-      // Refresh data after generating
-      const data = await fetch(
-        `http://3.109.152.136:8080/api/payrolls/getWeeklySalary?fromDate=${weekRange.start}&toDate=${weekRange.end}`,
-        {
-          headers: {
-            Authorization: `Bearer ${auth.token}`,
-          },
-        }
-      ).then(res => res.json())
-
-      setApiData(data)
+      if (!res.ok) throw new Error(`API error: ${res.statusText}`)
+      await fetchData(weekRange)
       setShowGenerateDialog(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate salary")
-      console.error("Error generating weekly salary:", err)
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
-  return (
-    <div className="w-full space-y-6 px-6 py-8">
-      {/* Error Message */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
-          <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0" />
-          <span className="text-red-700">{error}</span>
-        </div>
-      )}
+  // ── derived ───────────────────────────────────────────────────────────────
 
-      {/* Filters Card */}
-      <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
+  const filteredData = apiData.filter(r =>
+    selectedEmployee ? r.employeeName === selectedEmployee : true
+  )
+
+  const employeeOptions = useMemo(() => {
+    const unique = Array.from(new Set(apiData.map(r => r.employeeName)))
+    return [{ value: "", label: "All Employees" }, ...unique.map(e => ({ value: e, label: e }))]
+  }, [apiData])
+
+  const totals = useMemo(() => filteredData.reduce((acc, r) => ({
+    regular:   acc.regular   + (r.regularSalaryTotal  || 0),
+    ot:        acc.ot        + (r.overtimeSalaryTotal  || 0),
+    allowance: acc.allowance + (r.allowanceTotal       || 0),
+    penalty:   acc.penalty   + (r.penaltyAmount        || 0),
+    net:       acc.net       + (r.netPay               || 0),
+    present:   acc.present   + (r.presentDays          || 0),
+    working:   acc.working   + (r.workingDays          || 0),
+  }), { regular: 0, ot: 0, allowance: 0, penalty: 0, net: 0, present: 0, working: 0 }), [filteredData])
+
+  return (
+    <div className="w-full space-y-4 px-6 py-6">
+
+      {/* ── Filter bar ──────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
         <div className="flex flex-wrap gap-4 items-end">
-          {/* Employee Combo Box */}
+
           <div className="space-y-1 flex-shrink-0">
-            <Label className="text-slate-700 font-semibold text-sm">Employee</Label>
+            <Label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              Employee
+            </Label>
             <SearchableComboBox
               options={employeeOptions}
               value={selectedEmployee}
               onValueChange={setSelectedEmployee}
-              placeholder="Select employee..."
+              placeholder="All Employees"
               searchPlaceholder="Search employees..."
             />
           </div>
 
-          {/* Date Picker */}
           <div className="space-y-1 flex-shrink-0">
-            <Label className="text-slate-700 font-semibold text-sm">Select Date</Label>
+            <Label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              Select Date
+            </Label>
             <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
-                  <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
-                  <span className="text-slate-900 font-medium text-sm">
-                    {selectedDate.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
-                  </span>
+                <Button
+                  variant="outline"
+                  className="h-9 px-3 gap-2 text-sm font-normal bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  <CalendarIcon className="h-3.5 w-3.5 text-gray-400" />
+                  {selectedDate.toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" })}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
                 <MultiViewCalendar
                   selected={selectedDate}
-                  onSelect={(date) => {
-                    setSelectedDate(date)
-                    setIsCalendarOpen(false)
-                  }}
+                  onSelect={d => { setSelectedDate(d); setIsCalendarOpen(false) }}
                   fromYear={2020}
                   toYear={2030}
                 />
@@ -227,143 +179,206 @@ export function WeeklySalaryScreen() {
             </Popover>
           </div>
 
-          {/* Week Range Display */}
+          {/* Week range pill */}
           <div className="space-y-1 flex-shrink-0">
-            <Label htmlFor="week-range-display" className="text-slate-700 font-semibold text-sm">Week Range</Label>
-            <input
-              id="week-range-display"
-              type="text"
-              value={weekRangeDisplay}
-              disabled
-              className="h-9 rounded-md border border-slate-300 bg-slate-100 px-2 py-1 text-xs ring-offset-background placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-75 font-semibold text-slate-700"
-            />
+            <Label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              Week
+            </Label>
+            <div className="h-9 flex items-center px-3 rounded-lg border border-gray-200 bg-gray-50 text-xs font-semibold text-gray-600 whitespace-nowrap">
+              {weekRangeDisplay}
+            </div>
           </div>
+
           <div className="ml-auto">
-            <Button 
-              onClick={handleGenerateSalary}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+            <Button
+              onClick={() => setShowGenerateDialog(true)}
+              className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium gap-1.5"
             >
-              <Zap className="mr-2 h-4 w-4" />
+              <Zap className="h-3.5 w-3.5" />
               Generate Salary
             </Button>
           </div>
+
         </div>
       </div>
 
-      {/* Data Table Card */}
-      <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-200 bg-slate-50">
-          <h2 className="text-lg font-semibold text-slate-900">Weekly Salary Records</h2>
+      {/* ── Error ───────────────────────────────────────────────────────── */}
+      {error && (
+        <div className="flex items-center gap-2.5 px-4 py-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          {error}
         </div>
+      )}
+
+      {/* ── Table ───────────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+          <h2 className="text-sm font-semibold text-gray-800">Weekly Salary Records</h2>
+          {!loading && (
+            <span className="text-xs text-gray-400">
+              {filteredData.length} employee{filteredData.length !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+
         <div className="overflow-x-auto">
           {loading ? (
-            <div className="text-center py-12 text-slate-500">Loading weekly salary data...</div>
+            <div className="py-14 text-center text-sm text-gray-400">Loading weekly salary data…</div>
           ) : (
             <table className="w-full text-sm">
+
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-6 py-4 text-left font-semibold text-slate-900 border-r border-slate-200">Employee Name</th>
-                  <th className="px-6 py-4 text-center font-semibold text-slate-900 border-r border-slate-200">Week Start</th>
-                  <th className="px-6 py-4 text-center font-semibold text-slate-900 border-r border-slate-200">Week End</th>
-                  <th className="px-6 py-4 text-center font-semibold text-slate-900 border-r border-slate-200">Work Days</th>
-                  <th className="px-6 py-4 text-center font-semibold text-slate-900 border-r border-slate-200">Present</th>
-                  <th className="px-6 py-4 text-center font-semibold text-slate-900 border-r border-slate-200">Absent</th>
-                  <th className="px-6 py-4 text-right font-semibold text-slate-900 border-r border-slate-200">Regular Salary</th>
-                  <th className="px-6 py-4 text-right font-semibold text-slate-900 border-r border-slate-200">Overtime</th>
-                  <th className="px-6 py-4 text-right font-semibold text-slate-900 border-r border-slate-200">Allowances</th>
-                  <th className="px-6 py-4 text-right font-semibold text-slate-900 border-r border-slate-200">Penalty Mins</th>
-                  <th className="px-6 py-4 text-right font-semibold text-slate-900 border-r border-slate-200">Penalty Amt</th>
-                  <th className="px-6 py-4 text-center font-semibold text-slate-900 border-r border-slate-200">Warnings</th>
-                  <th className="px-6 py-4 text-right font-semibold text-slate-900">Net Salary</th>
+                <tr className="border-b border-gray-200 bg-gray-50">
+                  <th className="px-5 py-3 text-left   text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Employee</th>
+                  <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Work Days</th>
+                  <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Present</th>
+                  <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Absent</th>
+                  <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Att. %</th>
+                  <th className="px-5 py-3 text-right  text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Regular</th>
+                  <th className="px-5 py-3 text-right  text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Overtime</th>
+                  <th className="px-5 py-3 text-right  text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Allowance</th>
+                  <th className="px-5 py-3 text-right  text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Gross Pay</th>
+                  <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Warnings</th>
+                  <th className="px-5 py-3 text-right  text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Penalty Mins</th>
+                  <th className="px-5 py-3 text-right  text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Penalty (₹)</th>
+                  <th className="px-5 py-3 text-right  text-xs font-semibold text-gray-500 whitespace-nowrap">Net Salary</th>
                 </tr>
               </thead>
+
               <tbody>
-                {filteredData.length > 0 ? (
-                  filteredData.map((record) => (
-                    <tr
-                      key={record.employeeId}
-                      className="border-b border-slate-200 hover:bg-blue-50 transition-colors"
-                    >
-                      <td className="px-6 py-4 font-medium text-slate-900 border-r border-slate-200">{record.employeeName}</td>
-                      <td className="px-6 py-4 text-center text-slate-700 border-r border-slate-200">{record.weekStart}</td>
-                      <td className="px-6 py-4 text-center text-slate-700 border-r border-slate-200">{record.weekEnd}</td>
-                      <td className="px-6 py-4 text-center text-slate-700 border-r border-slate-200">{record.workingDays}</td>
-                      <td className="px-6 py-4 text-center border-r border-slate-200">
-                        <Badge className="bg-green-100 text-green-800 border-green-300">{record.presentDays}</Badge>
-                      </td>
-                      <td className="px-6 py-4 text-center border-r border-slate-200">
-                        <Badge className="bg-red-100 text-red-800 border-red-300">{record.absentDays}</Badge>
-                      </td>
-                      <td className="px-6 py-4 text-right text-slate-700 border-r border-slate-200">₹{record.regularSalaryTotal.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-right text-slate-700 border-r border-slate-200">₹{record.overtimeSalaryTotal.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-right text-slate-700 border-r border-slate-200">₹{record.allowanceTotal.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-right border-r border-slate-200">
-                        {record.penaltyTotal > 0 ? (
-                          <span className="text-red-600 font-medium">{record.penaltyTotal}</span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right border-r border-slate-200">
-                        {record.penaltyAmount > 0 ? (
-                          <span className="text-red-600 font-medium">₹{record.penaltyAmount.toFixed(2)}</span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-center border-r border-slate-200">
-                        {record.warningTotal > 0 ? (
-                          <Badge className="bg-amber-100 text-amber-800 border-amber-300">{record.warningTotal}</Badge>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right font-bold text-blue-600">₹{record.netPay.toFixed(2)}</td>
-                    </tr>
-                  ))
-                ) : (
+                {filteredData.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="text-center py-12 text-slate-500">
+                    <td colSpan={13} className="py-14 text-center text-sm text-gray-400">
                       No salary records found for the selected week and employee.
                     </td>
                   </tr>
-                )}
+                ) : filteredData.map(r => {
+                  const gross = (r.regularSalaryTotal || 0) + (r.overtimeSalaryTotal || 0) + (r.allowanceTotal || 0)
+                  return (
+                    <tr key={r.employeeId} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+
+                      {/* Employee + week range */}
+                      <td className="px-5 py-3.5 whitespace-nowrap border-r border-gray-300">
+                        <div className="font-medium text-gray-800">{r.employeeName}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">{r.weekStart} – {r.weekEnd}</div>
+                      </td>
+
+                      {/* Attendance */}
+                      <td className="px-5 py-3.5 text-center text-gray-700 whitespace-nowrap border-r border-gray-300">
+                        {r.workingDays}
+                      </td>
+                      <td className="px-5 py-3.5 text-center text-gray-700 whitespace-nowrap border-r border-gray-300">
+                        {r.presentDays}
+                      </td>
+                      <td className="px-5 py-3.5 text-center whitespace-nowrap border-r border-gray-300">
+                        {r.absentDays > 0
+                          ? <span className="text-gray-700">{r.absentDays}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className={`px-5 py-3.5 text-center whitespace-nowrap border-r border-gray-300 ${attendanceColor(r.presentDays, r.workingDays)}`}>
+                        {attendancePct(r.presentDays, r.workingDays)}
+                      </td>
+
+                      {/* Earnings */}
+                      <td className="px-5 py-3.5 text-right font-mono text-gray-700 whitespace-nowrap border-r border-gray-300">
+                        {fmt(r.regularSalaryTotal)}
+                      </td>
+                      <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
+                        {(r.overtimeSalaryTotal || 0) > 0
+                          ? <span className="text-gray-700">{fmt(r.overtimeSalaryTotal)}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
+                        {(r.allowanceTotal || 0) > 0
+                          ? <span className="text-gray-700">{fmt(r.allowanceTotal)}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+
+                      {/* Gross */}
+                      <td className="px-5 py-3.5 text-right font-mono font-semibold text-gray-800 whitespace-nowrap border-r border-gray-300">
+                        {fmt(gross)}
+                      </td>
+
+                      {/* Warnings */}
+                      <td className="px-5 py-3.5 text-center border-r border-gray-300">
+                        {r.warningTotal > 0
+                          ? <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-xs">{r.warningTotal}</Badge>
+                          : <span className="text-slate-300 text-xs">—</span>}
+                      </td>
+
+                      {/* Penalty mins */}
+                      <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
+                        {<span className="text-red-500 font-medium">{r.penaltyTotal}</span>}
+                      </td>
+
+                      {/* Penalty ₹ */}
+                      <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
+                        {(r.penaltyAmount || 0) > 0
+                          ? <span className="text-red-500 font-medium">{fmt(r.penaltyAmount)}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+
+                      {/* Net salary */}
+                      <td className="px-5 py-3.5 text-right font-mono font-semibold text-blue-600 whitespace-nowrap">
+                        {fmt(r.netPay)}
+                      </td>
+
+                    </tr>
+                  )
+                })}
               </tbody>
+
+              {/* Footer totals */}
+              {filteredData.length > 1 && (
+                <tfoot>
+                  <tr className="border-t border-gray-200 bg-gray-50 font-semibold text-sm">
+                    <td className="px-5 py-3 text-gray-600" colSpan={2}>
+                      Total <span className="font-normal text-gray-400 text-xs">({filteredData.length} employees)</span>
+                    </td>
+                    <td className="px-5 py-3 text-center font-mono text-gray-700">{totals.present}</td>
+                    <td className="px-5 py-3" />
+                    <td className={`px-5 py-3 text-center ${attendanceColor(totals.present, totals.working)}`}>
+                      {attendancePct(totals.present, totals.working)}
+                    </td>
+                    <td className="px-5 py-3 text-right font-mono text-gray-700">{fmt(totals.regular)}</td>
+                    <td className="px-5 py-3 text-right font-mono text-gray-700">{fmt(totals.ot)}</td>
+                    <td className="px-5 py-3 text-right font-mono text-gray-700">{fmt(totals.allowance)}</td>
+                    <td className="px-5 py-3 text-right font-mono text-gray-800 font-bold">
+                      {fmt(totals.regular + totals.ot + totals.allowance)}
+                    </td>
+                    <td className="px-5 py-3" />
+                    <td className="px-5 py-3" />
+                    <td className="px-5 py-3 text-right font-mono text-gray-700">
+                      {totals.penalty > 0 ? fmt(totals.penalty) : "—"}
+                    </td>
+                    <td className="px-5 py-3 text-right font-mono font-bold text-blue-600">{fmt(totals.net)}</td>
+                  </tr>
+                </tfoot>
+              )}
+
             </table>
           )}
         </div>
       </div>
 
-      {/* Generate Salary Dialog */}
+      {/* ── Generate dialog ─────────────────────────────────────────────── */}
       <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Generate Weekly Salary</DialogTitle>
             <DialogDescription>
-              Weekly salary will be calculated for all employees for the week{' '}
-              <span className="font-semibold text-slate-900">
-                {weekRangeDisplay}
-              </span>
+              Salary will be calculated for all employees for the week{" "}
+              <span className="font-semibold text-gray-900">{weekRangeDisplay}</span>.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="gap-3 sm:gap-0">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setShowGenerateDialog(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={handleConfirmGenerate}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              Generate
-            </Button>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setShowGenerateDialog(false)}>Cancel</Button>
+            <Button onClick={handleConfirmGenerate} className="bg-blue-600 hover:bg-blue-700 text-white">Generate</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </div>
   )
 }

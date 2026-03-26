@@ -81,7 +81,7 @@ export default function EmployeePunchHistoryScreen() {
       }
 
       const token = auth.token
-      const url = `http://3.109.152.136:8080/api/punch/history?startDate=${filters.startDate}&endDate=${filters.endDate}`
+      const url = `http://localhost:8080/api/punch/history?startDate=${filters.startDate}&endDate=${filters.endDate}`
       const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,

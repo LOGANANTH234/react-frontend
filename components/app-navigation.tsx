@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { FileText, Users, Calendar, Clock, UserCog, ChevronLeft, ChevronRight, ShieldCheck, Gift, ClipboardEdit, DollarSign, AlertTriangle } from "lucide-react"
+import { FileText, Users, Calendar, Clock, UserCog, ChevronLeft, ChevronRight, ShieldCheck, Gift, ClipboardEdit, DollarSign, AlertTriangle, BarChart3 } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useHasModule, MODULES } from "@/lib/permission-utils"
 
@@ -48,7 +48,7 @@ export function AppNavigation() {
     {
       name: "Employee 360°",
       href: "/employee-360",
-      icon: Users,
+      icon: BarChart3,
       color: "text-teal-600",
       bgColor: "bg-teal-100",
       activeBg: "bg-teal-500",

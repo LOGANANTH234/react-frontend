@@ -31,8 +31,8 @@ interface WarningRecord {
   id: number
   employeeName: string
   warningDate: string
-  lateMinutes: number
-  penaltyApplied: number
+  lateMinutes: string
+  penaltyApplied: boolean
   warningType: string
   expectedTime: string
   actualTime: string
@@ -43,8 +43,8 @@ interface ApiResponse {
   employeeId: string
   employeeName: string
   warningDate: string
-  lateMinutes: number
-  penaltyApplied: number
+  lateMinutes: string
+  penaltyApplied: boolean
   warningType: string
   expectedTime: string
   actualTime: string
@@ -111,7 +111,7 @@ export function WarningsScreen() {
         const endDateString = `${endYear}-${endMonth}-${endDay}`
 
         const response = await fetch(
-          `http://3.109.152.136:8080/api/warnings/by-range?from=${startDateString}&to=${endDateString}`,
+          `http://localhost:8080/api/warnings/by-range?from=${startDateString}&to=${endDateString}`,
           {
             headers: {
               Authorization: `Bearer ${auth.token}`,
@@ -299,11 +299,11 @@ export function WarningsScreen() {
                         <td className="px-6 py-4 text-center border-r border-slate-200">
                           <span className="text-slate-700 font-medium">{record.actualTime}</span>
                         </td>
-                        <td className="px-6 py-4 text-center border-r border-slate-200">
+                        <td className="px-6 py-4 text-center border-r border-slate-200 flex items-center justify-center">
                           <span className="text-slate-700 font-medium">{record.lateMinutes}</span>
                         </td>
                         <td className="px-6 py-4 text-center border-r border-slate-200">
-                          {record.penaltyApplied === 1 ? (
+                          {record.penaltyApplied === true ? (
                             <Badge className="bg-red-100 text-red-800 border-red-300">Yes</Badge>
                           ) : (
                             <span className="text-slate-400">No</span>

@@ -1,436 +1,1407 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Search, X, ShuffleIcon, LucideTimerOff as LucideTimerOffIcon, IndianRupeeIcon, Loader2 } from "lucide-react"
-import type { Employee } from "@/lib/employee-types"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import {
+  Search, X, User, Clock, TrendingUp, AlertTriangle,
+  Building2, DollarSign, Activity,
+  CheckCircle2, XCircle, ArrowLeft, BarChart3, Edit3,
+  Plus, Trash2, Edit2, ChevronLeft,
+  CalendarIcon, RefreshCw, PanelLeftClose, PanelLeftOpen,
+  Zap
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { AttendanceAnalyticsPanel } from "./attendance-analytics-panel"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Lock, Loader2, ChevronDown, ChevronRight } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { useAuth } from "@/lib/contexts/auth-context"
+import { MultiViewCalendar } from "./multi-view-calendar"
+import PunchAddModal from "./punch-add-modal"
+import PunchEditModal from "./punch-edit-modal"
+import PunchDeleteModal from "./punch-delete-modal"
+import EmployeeFormModal from "./employee-form-modal"
+import type { Employee } from "@/lib/employee-types"
+import { format } from "date-fns"
+import { getWeekRangeISO, getWeekStart, getWeekEnd, formatDateShort } from "@/lib/date-week-utils"
 
-const mapApiEmployeeToEmployee = (apiEmployee: any): Employee => {
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ApiEmployee {
+  id: string
+  employeeId: string
+  employeeName: string
+  phone: string
+  email: string
+  pan: string
+  aadhaar: string
+  gender: string
+  role: string
+  status: string
+  salaryFrequency: string
+  workdayPolicy: string
+  startDate: string
+  imageUrl: string
+  regularShifts: { shiftId: number; shiftName: string; amountType: string; amount: number; extraAllowance: number }[]
+  overtimeShifts: { shiftId: number; shiftName: string; amountType: string; amount: number; extraAllowance: number }[]
+}
+
+interface PunchRecord {
+  id: string
+  employeeId: string
+  employeeName: string
+  date: string
+  time: string
+  type: "IN" | "OUT"
+  source: string
+  shift: string
+  status: "valid" | "missing-out" | "overlap" | "edited"
+}
+
+interface DailySalaryRow {
+  id: number
+  employeeName: string
+  workDate: string
+  workDuration: string
+  payableMinutes: string
+  regularSalary: number
+  OvertimeSalary: number
+  extraAllowance: number
+  warningCount: number
+  penaltyMinutes: string
+  penaltyAmountDeducted: number
+  totalPay: number
+}
+
+interface WeeklySalaryRow {
+  employeeId: string
+  employeeName: string
+  weekStart: string
+  weekEnd: string
+  workingDays: number
+  presentDays: number
+  absentDays: number
+  regularSalaryTotal: number
+  overtimeSalaryTotal: number
+  allowanceTotal: number
+  penaltyTotal: number
+  penaltyAmount: number
+  warningTotal: number
+  netPay: number
+  
+}
+
+interface MonthlySalaryRow {
+  employeeId: string
+  employeeName: string
+  payrollMonth: string
+  workingDays: number
+  presentDays: number
+  absentDays: number
+  regularSalaryTotal: number
+  overtimeSalaryTotal: number
+  allowanceTotal: number
+  penaltyMins: string
+  penaltyAmount: number
+  warningTotal: number
+  netPay: number
+
+}
+
+interface WarningRow {
+  id: number
+  employeeId: string
+  employeeName: string
+  warningDate: string
+  expectedTime: string
+  actualTime: string
+  lateMinutes: number
+  penaltyApplied: boolean
+  warningType: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BASE = "http://localhost:8080"
+
+function fmt(n: number | null | undefined) {
+  if (n == null || isNaN(n)) return "₹0.00"
+  return `₹${n.toFixed(2)}`
+}
+function todayStr() { return new Date().toISOString().split("T")[0] }
+function initials(name: string) {
+  return name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()
+}
+function hasPenaltyMins(s?: string) {
+  if (!s) return false
+  return s !== "0h:0m" && s !== "0h:00m" && s !== "0"
+}
+function attendancePct(present: number, working: number): string {
+  if (!working) return "—"
+  return `${Math.round((present / working) * 100)}%`
+}
+function attendanceColor(present: number, working: number): string {
+  if (!working) return "text-slate-400"
+  const pct = (present / working) * 100
+  if (pct >= 90) return "text-green-600 font-semibold"
+  if (pct >= 70) return "text-amber-600 font-semibold"
+  return "text-red-600 font-semibold"
+}
+function formatGeneratedAt(ts: string | null): string {
+  if (!ts) return "—"
+  try { return new Date(ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) }
+  catch { return ts }
+}
+function dateToWeekRange(d: Date) { return getWeekRangeISO(d) }
+function dateToMonthStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+}
+function toDateStr(d: Date) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+
+function toEmployee(e: ApiEmployee): Employee {
   return {
-    id: apiEmployee.id,
-    name: apiEmployee.employeeName,
-    employeeId: apiEmployee.employeeId,
-    phone: apiEmployee.phone,
-    email: apiEmployee.email,
-    pan: apiEmployee.pan,
-    aadhaar: apiEmployee.aadhaar,
-    profileImage: apiEmployee.imageUrl,
-    gender: apiEmployee.gender === "MALE" ? "Male" : apiEmployee.gender === "FEMALE" ? "Female" : "Other",
-    role: apiEmployee.role,
-    status: apiEmployee.status === "ACTIVE" ? "Active" : "Inactive",
-    regularShifts: apiEmployee.regularShifts.map((shift: any) => ({
-      id: shift.shiftId.toString(),
-      shiftName: shift.shiftName,
-      amountType: shift.amountType,
-      amount: shift.amount,
-      extraAllowance: shift.extraAllowance,
+    id: e.id, name: e.employeeName, employeeId: e.employeeId,
+    phone: e.phone, email: e.email, pan: e.pan, aadhaar: e.aadhaar,
+    profileImage: e.imageUrl,
+    gender: e.gender === "MALE" ? "Male" : e.gender === "FEMALE" ? "Female" : "Other",
+    role: e.role,
+    status: e.status === "ACTIVE" ? "Active" : "Inactive",
+    regularShifts: (e.regularShifts || []).map(s => ({
+      id: s.shiftId.toString(), shiftId: s.shiftId.toString(),
+      shiftName: s.shiftName, amountType: s.amountType as any,
+      amount: s.amount, extraAllowance: s.extraAllowance,
     })),
-    overtimeShifts: apiEmployee.overtimeShifts.map((shift: any) => ({
-      id: shift.shiftId.toString(),
-      shiftName: shift.shiftName,
-      amountType: shift.amountType,
-      amount: shift.amount,
-      extraAllowance: shift.extraAllowance,
+    overtimeShifts: (e.overtimeShifts || []).map(s => ({
+      id: s.shiftId.toString(), shiftId: s.shiftId.toString(),
+      shiftName: s.shiftName, amountType: s.amountType as any,
+      amount: s.amount, extraAllowance: s.extraAllowance,
     })),
     salaryConfig: {
-      frequency: apiEmployee.salaryFrequency === "Monthly" ? "By Month" : "By Day",
-      workdayPolicy: apiEmployee.workdayPolicy.includes("All Days")
+      frequency: e.salaryFrequency?.toLowerCase().includes("month") ? "By Month" : "By Day",
+      workdayPolicy: e.workdayPolicy?.includes("All")
         ? "Include All Days"
-        : apiEmployee.workdayPolicy.includes("Sundays")
+        : e.workdayPolicy?.includes("Sunday")
           ? "Exclude Sundays"
           : "Exclude Saturdays & Sundays",
     },
-    createdAt: new Date().toISOString(),
+    createdAt: e.startDate || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
 }
 
-export function Employee360Dashboard() {
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null)
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared table style constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TH   = "px-4 py-3 text-left   font-semibold text-gray-500 text-xs uppercase tracking-wide border-b border-gray-200 bg-gray-50 whitespace-nowrap"
+const TH_R = "px-4 py-3 text-right  font-semibold text-gray-500 text-xs uppercase tracking-wide border-b border-gray-200 bg-gray-50 whitespace-nowrap"
+const TH_C = "px-4 py-3 text-center font-semibold text-gray-500 text-xs uppercase tracking-wide border-b border-gray-200 bg-gray-50 whitespace-nowrap"
+const TD   = "px-4 py-3 text-left   text-sm text-gray-700 border-b border-gray-100"
+const TD_R = "px-4 py-3 text-right  font-mono text-sm text-gray-700 border-b border-gray-100"
+const TD_C = "px-4 py-3 text-center text-sm text-gray-700 border-b border-gray-100"
+
+function MoneyCell({ n }: { n: number }) {
+  return n > 0
+    ? <span className="font-mono font-semibold text-sm text-gray-800">{fmt(n)}</span>
+    : <span className="text-gray-300 text-sm">—</span>
+}
+function PenCell({ s }: { s?: string }) {
+  return hasPenaltyMins(s)
+    ? <span className="font-mono font-medium text-sm text-orange-600">{s}</span>
+    : <span className="text-gray-300 text-sm">—</span>
+}
+function WarnCell({ n }: { n: number }) {
+  return n > 0
+    ? <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-xs font-bold text-amber-700 border border-amber-200">{n}</span>
+    : <span className="text-gray-300 text-sm">—</span>
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generate confirm dialog — reused for Daily / Weekly / Monthly
+// ─────────────────────────────────────────────────────────────────────────────
+
+function GenerateDialog({
+  open, onClose, title, description, onConfirm, generating,
+}: {
+  open: boolean
+  onClose: () => void
+  title: string
+  description: string
+  onConfirm: () => Promise<void>
+  generating: boolean
+}) {
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o && !generating) onClose() }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-blue-600" />
+            {title}
+          </DialogTitle>
+          <DialogDescription className="text-sm text-gray-600 mt-1">
+            {description}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 mt-2">
+          <Button variant="outline" onClick={onClose} disabled={generating}>
+            Cancel
+          </Button>
+          <Button
+            onClick={onConfirm}
+            disabled={generating}
+            className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
+          >
+            {generating
+              ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</>
+              : <><Zap className="h-3.5 w-3.5" /> Generate</>}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Employee list sidebar
+// ─────────────────────────────────────────────────────────────────────────────
+
+function EmployeeListPanel({ employees, selected, onSelect, loading, error }: {
+  employees: ApiEmployee[]
+  selected: ApiEmployee | null
+  onSelect: (e: ApiEmployee) => void
+  loading: boolean
+  error: string | null
+}) {
+  const [search, setSearch] = useState("")
+  const filtered = employees.filter(e =>
+    e.employeeName.toLowerCase().includes(search.toLowerCase()) ||
+    e.employeeId.toLowerCase().includes(search.toLowerCase()) ||
+    (e.role || "").toLowerCase().includes(search.toLowerCase())
+  )
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-3 border-b border-gray-200">
+        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 h-9">
+          <Search className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+          <input className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none min-w-0"
+            placeholder="Search employees…" value={search} onChange={e => setSearch(e.target.value)} />
+          {search && <button onClick={() => setSearch("")} className="text-gray-400 hover:text-gray-600"><X className="h-3.5 w-3.5" /></button>}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {loading ? (
+          <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
+        ) : error ? (
+          <div className="p-4 text-sm text-red-500 text-center">{error}</div>
+        ) : filtered.length === 0 ? (
+          <div className="p-4 text-sm text-gray-400 text-center">No employees found</div>
+        ) : filtered.map(emp => {
+          const isActive = emp.status === "ACTIVE"
+          const isSel = selected?.id === emp.id
+          return (
+            <button key={emp.id} onClick={() => onSelect(emp)}
+              className={["w-full flex items-center gap-3 px-4 py-3 text-left border-b border-gray-100 hover:bg-blue-50 transition-colors",
+                isSel ? "bg-blue-50 border-l-2 border-l-blue-500" : ""].join(" ")}>
+              <div className={["w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0",
+                isActive ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"].join(" ")}>
+                {initials(emp.employeeName)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-gray-800 truncate">{emp.employeeName}</div>
+                <div className="text-xs text-gray-400 truncate">{emp.employeeId} · {emp.role || "—"}</div>
+              </div>
+              <div className={["w-2 h-2 rounded-full flex-shrink-0", isActive ? "bg-green-400" : "bg-gray-300"].join(" ")} />
+            </button>
+          )
+        })}
+      </div>
+      <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">
+        <span className="text-[11px] text-gray-400">{filtered.length} of {employees.length} employees</span>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Personal Info card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function PersonalInfoCard({ employee, onUpdated }: { employee: ApiEmployee; onUpdated: (u: ApiEmployee) => void }) {
+  const [editOpen, setEditOpen] = useState(false)
+  const rows = [
+    { label: "Phone",   value: employee.phone   || "—" },
+    { label: "Email",   value: employee.email   || "—" },
+    { label: "Gender",  value: employee.gender  || "—" },
+    { label: "PAN",     value: employee.pan     || "—", mono: true },
+    { label: "Aadhaar", value: employee.aadhaar ? `••••${employee.aadhaar.slice(-4)}` : "—", mono: true },
+    { label: "Joined",  value: employee.startDate || "—" },
+  ]
+  return (
+    <>
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+          <div className="flex items-center gap-2">
+            <User className="h-3.5 w-3.5 text-gray-500" />
+            <span className="text-xs font-semibold text-gray-600">Personal Info</span>
+          </div>
+          <button onClick={() => setEditOpen(true)}
+            className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-700 font-medium">
+            <Edit3 className="h-3 w-3" /> Edit
+          </button>
+        </div>
+        <div className="px-4 py-2 divide-y divide-gray-50">
+          {rows.map(r => (
+            <div key={r.label} className="flex items-center justify-between py-1.5">
+              <span className="text-xs text-gray-400">{r.label}</span>
+              <span className={`text-xs font-medium text-gray-700 ${r.mono ? "font-mono" : ""}`}>{r.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {editOpen && (
+        <EmployeeFormModal isOpen={editOpen} employee={toEmployee(employee)} onClose={() => setEditOpen(false)}
+          onSave={saved => {
+            onUpdated({
+              ...employee, phone: saved.phone, email: saved.email || "",
+              pan: saved.pan || "", aadhaar: saved.aadhaar || "",
+              gender: saved.gender?.toUpperCase() || employee.gender, role: saved.role,
+              status: saved.status === "Active" ? "ACTIVE" : "INACTIVE",
+              regularShifts: saved.regularShifts.map(s => ({
+                shiftId: parseInt(s.shiftId || s.id), shiftName: s.shiftName,
+                amountType: s.amountType as string, amount: s.amount, extraAllowance: s.extraAllowance || 0,
+              })),
+              overtimeShifts: saved.overtimeShifts.map(s => ({
+                shiftId: parseInt(s.shiftId || s.id), shiftName: s.shiftName,
+                amountType: s.amountType as string, amount: s.amount, extraAllowance: s.extraAllowance || 0,
+              })),
+            })
+            setEditOpen(false)
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Daily Salary table — reused inline & inside weekly drill-down
+// ─────────────────────────────────────────────────────────────────────────────
+
+function DailySalaryTable({ employee, token, date, refreshKey }: {
+  employee: ApiEmployee; token: string; date: string; refreshKey?: number
+}) {
+  const [rows, setRows] = useState<DailySalaryRow[]>([])
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    const fetchEmployees = async () => {
-      try {
-        setIsLoading(true)
-        const token = localStorage.getItem("auth") ? JSON.parse(localStorage.getItem("auth")!).token : null
-        const response = await fetch("http://3.109.152.136:8080/api/employees/getAllEmployees", {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token && { Authorization: `Bearer ${token}` }),
-          },
-        })
+    setLoading(true)
+    fetch(`${BASE}/api/payrolls/getDailySalary?date=${date}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: DailySalaryRow[]) => setRows(data.filter(r => r.employeeName === employee.employeeName)))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false))
+  }, [employee.employeeName, date, refreshKey])
 
-        if (!response.ok) {
-          throw new Error("Failed to fetch employees")
-        }
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-blue-400" /></div>
+  if (rows.length === 0) return <div className="text-center py-6 text-gray-400 text-sm">No salary record for {date}</div>
 
-        const data = await response.json()
-        const mappedEmployees = data.map(mapApiEmployeeToEmployee)
-        setEmployees(mappedEmployees)
-        setError(null)
-      } catch (err) {
-        console.error("Error fetching employees:", err)
-        setError("Failed to load employees. Please try again.")
-      } finally {
-        setIsLoading(false)
-      }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-gray-50 border-b border-gray-200">
+            <th className={TH}>Employee</th>
+            <th className={TH_C}>Regular Req. Hours</th>
+            <th className={TH_C}>Regular Paid Hours</th>
+            <th className={TH_R}>Regular Salary</th>
+            <th className={TH_R}>Overtime Salary</th>
+            <th className={TH_R}>Exatra Allowance</th>
+            <th className={TH_R}>Gross Pay</th>
+            <th className={TH_C}>Warnings</th>
+            <th className={TH_R}>Penalty Mins</th>
+            <th className={TH_R}>Penalty (₹)</th>
+            <th className={TH_R}>Net Salary</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => {
+            const p = r.penaltyAmountDeducted || 0
+            const gross = (r.regularSalary||0) + (r.OvertimeSalary||0) + (r.extraAllowance||0) + p
+            return (
+              <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                <td className={TD}>
+                  <div className="font-semibold text-gray-800">{r.employeeName}</div>
+                  <div className="text-xs text-gray-400 font-mono mt-0.5">{r.workDate}</div>
+                </td>
+                <td className={TD_C}><span className="font-mono text-sm text-gray-500">{r.payableMinutes || "—"}</span></td>
+                <td className={TD_C}><span className="font-mono text-sm text-gray-700 font-medium">{r.workDuration || "—"}</span></td>
+                <td className={TD_R}>{fmt(r.regularSalary)}</td>
+                <td className={TD_R}><MoneyCell n={r.OvertimeSalary||0} /></td>
+                <td className={TD_R}><MoneyCell n={r.extraAllowance||0} /></td>
+                <td className={`${TD_R} font-bold text-gray-900`}>{fmt(gross)}</td>
+                <td className={TD_C}><WarnCell n={r.warningCount} /></td>
+                <td className={TD_R}><PenCell s={r.penaltyMinutes} /></td>
+                <td className={TD_R}><MoneyCell n={p} /></td>
+                <td className={`${TD_R} font-semibold text-blue-600`}>{fmt(r.totalPay)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Weekly drill-down dialog
+// ─────────────────────────────────────────────────────────────────────────────
+
+function WeeklyDrillDownDialog({ open, onClose, employee, token, weekStart, weekEnd }: {
+  open: boolean; onClose: () => void
+  employee: ApiEmployee; token: string
+  weekStart: string; weekEnd: string
+}) {
+  const days = useMemo(() => {
+    const result: string[] = []
+    const d = new Date(weekStart + "T00:00:00")
+    while (d.toISOString().split("T")[0] <= weekEnd) {
+      result.push(d.toISOString().split("T")[0])
+      d.setDate(d.getDate() + 1)
     }
+    return result
+  }, [weekStart, weekEnd])
 
-    fetchEmployees()
-  }, [])
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o) onClose() }}>
+      <DialogContent className="max-w-5xl w-full max-h-[85vh] overflow-y-auto">
+        <DialogHeader className="pb-4 border-b border-gray-200">
+          <DialogTitle className="text-base font-bold text-gray-900">
+            Daily Breakdown — {weekStart} to {weekEnd}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 mt-4">
+          {days.map(day => (
+            <div key={day} className="border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+              <div className="bg-gray-50 px-4 py-2.5 border-b border-gray-200">
+                <span className="text-sm font-semibold text-gray-800">{day}</span>
+                <span className="text-xs text-gray-500 ml-2">
+                  {new Date(day + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" })}
+                </span>
+              </div>
+              <DailySalaryTable employee={employee} token={token} date={day} />
+            </div>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
-  const filteredEmployees = employees.filter((emp) => {
-    const matchesSearch =
-      emp.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      emp.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      emp.phone.includes(searchQuery)
+// ─────────────────────────────────────────────────────────────────────────────
+// Weekly Salary table
+// ─────────────────────────────────────────────────────────────────────────────
 
-    return matchesSearch
-  })
+function WeeklySalaryTable({ employee, token, date, refreshKey }: {
+  employee: ApiEmployee; token: string; date: Date; refreshKey?: number
+}) {
+  const [rows, setRows] = useState<WeeklySalaryRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [drill, setDrill] = useState<{ start: string; end: string } | null>(null)
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString)
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
+  const weekRange = useMemo(() => dateToWeekRange(date), [date])
+  const weekRangeDisplay = useMemo(() => {
+    const s = getWeekStart(date); const e = getWeekEnd(date)
+    return `${formatDateShort(s)} → ${formatDateShort(e)}`
+  }, [date])
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(`${BASE}/api/payrolls/getWeeklySalary?fromDate=${weekRange.start}&toDate=${weekRange.end}`,
+      { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: WeeklySalaryRow[]) => setRows(data.filter(r => r.employeeName === employee.employeeName)))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false))
+  }, [employee.employeeName, weekRange.start, weekRange.end, refreshKey])
+
+  if (loading) return <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-gray-300" /></div>
+  if (rows.length === 0) return <p className="text-sm text-gray-400 text-center py-5">No weekly record for {weekRangeDisplay}</p>
+
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr>
+              <th className={TH}>Employee</th>
+              <th className={TH_C}>Work Days</th>
+              <th className={TH_C}>Present</th>
+              <th className={TH_C}>Absent</th>
+              <th className={TH_C}>Att.%</th>
+              <th className={TH_R}>Regular</th>
+              <th className={TH_R}>Overtime</th>
+              <th className={TH_R}>Allowance</th>
+              <th className={TH_R}>Gross Pay</th>
+              <th className={TH_C}>Warnings</th>
+              <th className={TH_R}>Pen. Mins</th>
+              <th className={TH_R}>Penalty (₹)</th>
+              <th className={TH_R}>Net Salary</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const gross = (r.regularSalaryTotal||0) + (r.overtimeSalaryTotal||0) + (r.allowanceTotal||0)
+              return (
+                <tr key={r.employeeId}
+                  onClick={() => setDrill({ start: r.weekStart, end: r.weekEnd })}
+                  className="border-b border-gray-100 hover:bg-blue-50/50 cursor-pointer transition-colors group"
+                  title="Click to view daily breakdown">
+                  <td className={TD}>
+                    <div className="font-semibold text-gray-800 group-hover:text-blue-700">{r.employeeName}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{r.weekStart} – {r.weekEnd}</div>
+                  </td>
+                  <td className={TD_C}>{r.workingDays}</td>
+                  <td className={TD_C}>{r.presentDays}</td>
+                  <td className={TD_C}>{r.absentDays > 0 ? r.absentDays : <span className="text-gray-300">—</span>}</td>
+                  <td className={`${TD_C} ${attendanceColor(r.presentDays, r.workingDays)}`}>{attendancePct(r.presentDays, r.workingDays)}</td>
+                  <td className={TD_R}>{fmt(r.regularSalaryTotal)}</td>
+                  <td className={TD_R}><MoneyCell n={r.overtimeSalaryTotal||0} /></td>
+                  <td className={TD_R}><MoneyCell n={r.allowanceTotal||0} /></td>
+                  <td className={`${TD_R} font-bold text-gray-900`}>{fmt(gross)}</td>
+                  <td className={TD_C}><WarnCell n={r.warningTotal} /></td>
+                  <td className={TD_R}>{r.penaltyTotal > 0 ? <span className="font-mono text-sm text-gray-700">{r.penaltyTotal} min</span> : <span className="text-gray-300">—</span>}</td>
+                  <td className={TD_R}><MoneyCell n={r.penaltyAmount||0} /></td>
+                  <td className={`${TD_R} font-semibold text-blue-600`}>{fmt(r.netPay)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {drill && (
+        <WeeklyDrillDownDialog open={!!drill} onClose={() => setDrill(null)}
+          employee={employee} token={token} weekStart={drill.start} weekEnd={drill.end} />
+      )}
+    </>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Monthly drill-down dialog
+// ─────────────────────────────────────────────────────────────────────────────
+
+function MonthlyDrillDownDialog({ open, onClose, employee, token, monthStr, monthLabel }: {
+  open: boolean; onClose: () => void
+  employee: ApiEmployee; token: string
+  monthStr: string; monthLabel: string
+}) {
+  const [weeks, setWeeks] = useState<WeeklySalaryRow[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setLoading(true)
+    const [y, m] = monthStr.split("-").map(Number)
+    const start = `${monthStr}-01`
+    const end = `${monthStr}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`
+    fetch(`${BASE}/api/payrolls/getWeeklySalary?fromDate=${start}&toDate=${end}`,
+      { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: WeeklySalaryRow[]) => setWeeks(data.filter(r => r.employeeName === employee.employeeName)))
+      .catch(() => setWeeks([]))
+      .finally(() => setLoading(false))
+  }, [open, monthStr, employee.employeeName, token])
+
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o) onClose() }}>
+      <DialogContent className="max-w-7xl w-[95vw] max-h-[92vh] overflow-y-auto">
+        <DialogHeader className="pb-4 border-b border-gray-200">
+          <DialogTitle className="text-base font-bold text-gray-900">
+            Weekly Breakdown — {monthLabel}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="mt-4">
+          {loading ? (
+            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-blue-400" /></div>
+          ) : weeks.length === 0 ? (
+            <div className="text-center py-6 text-gray-400 text-sm">No weekly records for {monthLabel}</div>
+          ) : (
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr>
+                    <th className={TH}>Week</th>
+                    <th className={TH_C}>Work Days</th>
+                    <th className={TH_C}>Present</th>
+                    <th className={TH_C}>Absent</th>
+                    <th className={TH_C}>Att.%</th>
+                    <th className={TH_R}>Regular</th>
+                    <th className={TH_R}>Overtime</th>
+                    <th className={TH_R}>Allowance</th>
+                    <th className={TH_R}>Gross Pay</th>
+                    <th className={TH_C}>Warnings</th>
+                    <th className={TH_R}>Pen. Mins</th>
+                    <th className={TH_R}>Penalty (₹)</th>
+                    <th className={TH_R}>Net Salary</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {weeks.map((r, i) => {
+                    const gross = (r.regularSalaryTotal||0) + (r.overtimeSalaryTotal||0) + (r.allowanceTotal||0)
+                    return (
+                      <tr key={i} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td className={TD}><span className="font-medium text-gray-700">{r.weekStart} – {r.weekEnd}</span></td>
+                        <td className={TD_C}>{r.workingDays}</td>
+                        <td className={TD_C}>{r.presentDays}</td>
+                        <td className={TD_C}>{r.absentDays > 0 ? r.absentDays : <span className="text-gray-300">—</span>}</td>
+                        <td className={`${TD_C} ${attendanceColor(r.presentDays, r.workingDays)}`}>{attendancePct(r.presentDays, r.workingDays)}</td>
+                        <td className={TD_R}>{fmt(r.regularSalaryTotal)}</td>
+                        <td className={TD_R}><MoneyCell n={r.overtimeSalaryTotal||0} /></td>
+                        <td className={TD_R}><MoneyCell n={r.allowanceTotal||0} /></td>
+                        <td className={`${TD_R} font-bold text-gray-900`}>{fmt(gross)}</td>
+                        <td className={TD_C}><WarnCell n={r.warningTotal} /></td>
+                        <td className={TD_R}>{r.penaltyTotal > 0 ? <span className="text-gray-700">{r.penaltyTotal} min</span> : <span className="text-gray-300">—</span>}</td>
+                        <td className={TD_R}><MoneyCell n={r.penaltyAmount||0} /></td>
+                        <td className={`${TD_R} font-semibold text-blue-600`}>{fmt(r.netPay)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Monthly Salary table
+// ─────────────────────────────────────────────────────────────────────────────
+
+function MonthlySalaryTable({ employee, token, date, refreshKey }: {
+  employee: ApiEmployee; token: string; date: Date; refreshKey?: number
+}) {
+  const [rows, setRows] = useState<MonthlySalaryRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [drillMonth, setDrillMonth] = useState<{ str: string; label: string } | null>(null)
+
+  const monthStr = useMemo(() => dateToMonthStr(date), [date])
+  const monthLabel = date.toLocaleDateString("en-US", { year: "numeric", month: "long" })
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(`${BASE}/api/payrolls/getMonthlySalary?month=${monthStr}`,
+      { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: MonthlySalaryRow[]) => setRows(data.filter(r => r.employeeName === employee.employeeName)))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false))
+  }, [employee.employeeName, monthStr, refreshKey])
+
+  if (loading) return <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-gray-300" /></div>
+  if (rows.length === 0) return <div className="text-center py-5 text-sm text-gray-400">No payroll record for {monthLabel}</div>
+
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr>
+              <th className={TH}>Employee</th>
+              <th className={TH_C}>Work Days</th>
+              <th className={TH_C}>Present</th>
+              <th className={TH_C}>Absent</th>
+              <th className={TH_C}>Att.%</th>
+              <th className={TH_R}>Regular</th>
+              <th className={TH_R}>Overtime</th>
+              <th className={TH_R}>Allowance</th>
+              <th className={TH_R}>Gross Pay</th>
+              <th className={TH_C}>Warnings</th>
+              <th className={TH_R}>Pen. Mins</th>
+              <th className={TH_R}>Penalty (₹)</th>
+              <th className={TH_R}>Net Salary</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const gross = (r.regularSalaryTotal||0) + (r.overtimeSalaryTotal||0) + (r.allowanceTotal||0)
+              const lbl = new Date(r.payrollMonth + "-01").toLocaleDateString("en-US", { year: "numeric", month: "long" })
+              return (
+                <tr key={i}
+                  onClick={() => setDrillMonth({ str: r.payrollMonth, label: lbl })}
+                  className="border-b border-gray-100 hover:bg-blue-50/50 cursor-pointer transition-colors group"
+                  title="Click to view weekly breakdown">
+                  <td className={TD}>
+                    <div className="font-semibold text-gray-800 group-hover:text-blue-700">{r.employeeName}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{r.payrollMonth}</div>
+                  </td>
+                  <td className={TD_C}>{r.workingDays}</td>
+                  <td className={TD_C}>{r.presentDays}</td>
+                  <td className={TD_C}>{r.absentDays > 0 ? r.absentDays : <span className="text-gray-300">—</span>}</td>
+                  <td className={`${TD_C} ${attendanceColor(r.presentDays, r.workingDays)}`}>{attendancePct(r.presentDays, r.workingDays)}</td>
+                  <td className={TD_R}>{fmt(r.regularSalaryTotal)}</td>
+                  <td className={TD_R}><MoneyCell n={r.overtimeSalaryTotal||0} /></td>
+                  <td className={TD_R}><MoneyCell n={r.allowanceTotal||0} /></td>
+                  <td className={`${TD_R} font-bold text-gray-900`}>{fmt(gross)}</td>
+                  <td className={TD_C}><WarnCell n={r.warningTotal} /></td>
+                  <td className={TD_R}>{hasPenaltyMins(r.penaltyMins) ? <span className="text-gray-700">{r.penaltyMins}</span> : <span className="text-gray-300">—</span>}</td>
+                  <td className={TD_R}><MoneyCell n={r.penaltyAmount||0} /></td>
+                  <td className={`${TD_R} font-semibold text-blue-600`}>{fmt(r.netPay)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {drillMonth && (
+        <MonthlyDrillDownDialog open={!!drillMonth} onClose={() => setDrillMonth(null)}
+          employee={employee} token={token} monthStr={drillMonth.str} monthLabel={drillMonth.label} />
+      )}
+    </>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Warnings section
+// ─────────────────────────────────────────────────────────────────────────────
+
+function WarningsSection({ employee, token }: { employee: ApiEmployee; token: string }) {
+  const [warnings, setWarnings] = useState<WarningRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const mStr = dateToMonthStr(new Date())
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(`${BASE}/api/warnings/by-employee-month?employeeId=${employee.employeeId}&month=${mStr}`,
+      { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : []).then(setWarnings).catch(() => setWarnings([]))
+      .finally(() => setLoading(false))
+  }, [employee.employeeId])
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+        <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+        <span className="text-xs font-semibold text-gray-600">Warnings — {mStr}</span>
+        {!loading && warnings.length > 0 && (
+          <span className="ml-auto text-[11px] font-semibold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">
+            {warnings.length}
+          </span>
+        )}
+      </div>
+      <div className="p-4">
+        {loading ? (
+          <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-gray-300" /></div>
+        ) : warnings.length === 0 ? (
+          <div className="flex items-center gap-2 py-2">
+            <CheckCircle2 className="h-5 w-5 text-green-500" />
+            <span className="text-sm text-green-700 font-medium">No warnings this month</span>
+          </div>
+        ) : (
+          <div className="overflow-x-auto border border-gray-200 rounded-lg -mx-4 -my-4">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50">
+                  {["Date", "Type", "Expected", "Actual", "Late", "Penalty"].map(h => (
+                    <th key={h} className="px-4 py-3 text-left font-semibold text-gray-500 uppercase tracking-wide text-xs">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {warnings.map((w, i) => (
+                  <tr key={i} className="hover:bg-amber-50/50 transition-colors">
+                    <td className="px-4 py-3 font-mono text-sm text-gray-700">{w.warningDate}</td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md">{w.warningType}</span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-sm text-gray-600">{w.expectedTime || "—"}</td>
+                    <td className="px-4 py-3 font-mono text-sm text-gray-600">{w.actualTime || "—"}</td>
+                    <td className="px-4 py-3 font-mono font-bold text-sm text-red-600">{w.lateMinutes}m</td>
+                    <td className="px-4 py-3">
+                      {w.penaltyApplied
+                        ? <span className="text-xs font-semibold bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-md">Applied</span>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Role Permissions card
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface RoleResponse { id: number; code: string; name: string }
+interface ModuleAction { actionCode: string; actionName: string }
+interface ModuleTree   { moduleCode: string; moduleName: string; actions: ModuleAction[] }
+
+function RolePermissionsCard({ employee, token }: { employee: ApiEmployee; token: string }) {
+  const [modules, setModules] = useState<ModuleTree[]>([])
+  const [roleLabel, setRoleLabel] = useState(employee.role)
+  const [loading, setLoading] = useState(false)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    if (!employee.role || !token) return
+    setLoading(true)
+    fetch(`${BASE}/api/roles`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then(async (roles: RoleResponse[]) => {
+        const match = roles.find(r =>
+          r.name?.toLowerCase() === employee.role?.toLowerCase() ||
+          r.code?.toLowerCase() === employee.role?.toLowerCase()
+        )
+        if (!match) { setModules([]); return }
+        setRoleLabel(match.name)
+        const res = await fetch(`${BASE}/api/roles/${match.id}/config`, { headers: { Authorization: `Bearer ${token}` } })
+        const data = res.ok ? await res.json() : { moduleTree: [] }
+        const tree: ModuleTree[] = data.moduleTree || []
+        setModules(tree)
+        const exp: Record<string, boolean> = {}
+        tree.forEach(m => (exp[m.moduleCode] = true))
+        setExpanded(exp)
+      })
+      .catch(() => setModules([]))
+      .finally(() => setLoading(false))
+  }, [employee.role, token])
+
+  if (!employee.role) return null
+  const toggle = (code: string) => setExpanded(p => ({ ...p, [code]: !p[code] }))
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+        <Lock className="h-3.5 w-3.5 text-purple-500" />
+        <span className="text-xs font-semibold text-gray-600">Role Permissions</span>
+        {roleLabel && <span className="ml-auto text-[10px] text-gray-400 font-medium uppercase">{roleLabel}</span>}
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-gray-400" /></div>
+      ) : modules.length === 0 ? (
+        <div className="px-4 py-4 text-xs text-gray-400 text-center">No permissions assigned</div>
+      ) : (
+        <div className="max-h-[240px] overflow-y-auto">
+          {modules.map(mod => (
+            <div key={mod.moduleCode}>
+              <button onClick={() => toggle(mod.moduleCode)}
+                className="w-full flex items-center gap-2 px-4 py-2 hover:bg-gray-50 text-left border-b border-gray-100">
+                {expanded[mod.moduleCode]
+                  ? <ChevronDown className="h-3 w-3 text-gray-400" />
+                  : <ChevronRight className="h-3 w-3 text-gray-400" />}
+                <span className="text-xs font-semibold text-gray-700 flex-1">{mod.moduleName}</span>
+                <span className="text-[10px] text-gray-400">{mod.actions.length}</span>
+              </button>
+              {expanded[mod.moduleCode] && mod.actions.map(act => (
+                <div key={act.actionCode} className="pl-8 pr-4 py-1.5 text-[11px] text-gray-600 border-b border-gray-50">
+                  • {act.actionName}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Salary & Punch section — all driven by one shared date + generate buttons
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SalaryAndPunchSection({ employee, token }: { employee: ApiEmployee; token: string }) {
+  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [calOpen, setCalOpen]           = useState(false)
+  const [punches, setPunches]           = useState<PunchRecord[]>([])
+  const [loadingP, setLoadingP]         = useState(false)
+  const [errorP, setErrorP]             = useState<string | null>(null)
+  const [addOpen, setAddOpen]           = useState(false)
+  const [editOpen, setEditOpen]         = useState(false)
+  const [deleteOpen, setDeleteOpen]     = useState(false)
+  const [activePunch, setActivePunch]   = useState<PunchRecord | null>(null)
+
+  // refresh keys — bump to re-fetch the respective table after generate
+  const [dailyKey,   setDailyKey]   = useState(0)
+  const [weeklyKey,  setWeeklyKey]  = useState(0)
+  const [monthlyKey, setMonthlyKey] = useState(0)
+
+  // generate dialog state
+  const [genDialog,  setGenDialog]  = useState<"daily" | "weekly" | "monthly" | null>(null)
+  const [generating, setGenerating] = useState(false)
+
+  const dateStr = format(selectedDate, "yyyy-MM-dd")
+  const isToday = dateStr === todayStr()
+
+  const weekLabel = useMemo(() => {
+    const s = getWeekStart(selectedDate); const e = getWeekEnd(selectedDate)
+    return `${formatDateShort(s)} → ${formatDateShort(e)}`
+  }, [selectedDate])
+
+  const monthLabel = selectedDate.toLocaleDateString("en-US", { year: "numeric", month: "long" })
+
+  // ── fetch punches ──────────────────────────────────────────────────────────
+  const fetchPunches = useCallback(async (ds: string) => {
+    setLoadingP(true); setErrorP(null)
+    try {
+      const res = await fetch(`${BASE}/api/punch/${ds}`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) throw new Error(res.statusText)
+      setPunches((await res.json() || [])
+        .filter((p: any) => p.employeeId === employee.employeeId)
+        .map((p: any) => ({
+          id: p.id?.toString() || "", employeeId: p.employeeId,
+          employeeName: p.employeeName || employee.employeeName,
+          date: p.attendanceDate || "", time: p.punchTime || "",
+          type: p.punchType === "IN" ? "IN" : "OUT",
+          source: p.source || "MANUAL", shift: "Morning", status: "valid",
+        })))
+    } catch (e) { setErrorP(e instanceof Error ? e.message : "Failed") }
+    finally { setLoadingP(false) }
+  }, [employee.employeeId, token])
+
+  useEffect(() => { fetchPunches(dateStr) }, [dateStr, fetchPunches])
+
+  const goDate = (delta: number) => {
+    const d = new Date(selectedDate); d.setDate(d.getDate() + delta); setSelectedDate(d)
+  }
+  const handleDelete = async (punchId: string) => {
+    const res = await fetch(`${BASE}/api/punch/delete/${punchId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) throw new Error("Delete failed")
+    setTimeout(() => fetchPunches(dateStr), 400)
   }
 
-  const calculateEarnings = (emp: Employee) => {
-    const regularShifts = emp.regularShifts || []
-    const overtimeShifts = emp.overtimeShifts || []
+  // ── generate handlers ──────────────────────────────────────────────────────
+  const handleGenerate = async () => {
+    if (!genDialog) return
+    setGenerating(true)
+    try {
+      const ds = toDateStr(selectedDate)
+      const ms = dateToMonthStr(selectedDate)
+      const url =
+        genDialog === "daily"
+          ? `${BASE}/api/payrolls/calculate-daily-salary?date=${ds}`
+          : genDialog === "weekly"
+          ? `${BASE}/api/payrolls/GenerateWeeklySalary?anyDateInWeek=${ds}`
+          : `${BASE}/api/payrolls/generateMonthlyPayroll?month=${ms}`
 
-    const regularEarnings = regularShifts.reduce((sum, shift) => {
-      const dailyAmount = shift.amountType === "Per Day" ? shift.amount : shift.amount * 5 // Assume 5 shifts per week
-      const allowance = shift.extraAllowance || 0
-      return sum + (dailyAmount * 22 + allowance * 22) // 22 working days per month
-    }, 0)
+      const res = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) throw new Error(await res.text())
 
-    const overtimeEarnings = overtimeShifts.reduce((sum, shift) => {
-      return sum + shift.amount * 4 // Assume 4 OT shifts per month
-    }, 0)
+      // bump the right table's refresh key
+      if (genDialog === "daily")   setDailyKey(k => k + 1)
+      if (genDialog === "weekly")  setWeeklyKey(k => k + 1)
+      if (genDialog === "monthly") setMonthlyKey(k => k + 1)
 
-    return {
-      regular: regularEarnings,
-      overtime: overtimeEarnings,
-      total: regularEarnings + overtimeEarnings,
+      setGenDialog(null)
+    } catch (err) {
+      console.error("Generate error:", err)
+    } finally {
+      setGenerating(false)
     }
+  }
+
+  // ── generate dialog descriptions ───────────────────────────────────────────
+  const genMeta: Record<string, { title: string; description: string }> = {
+    daily: {
+      title: "Generate Daily Salary",
+      description: `Calculate salary for all employees for ${dateStr}.`,
+    },
+    weekly: {
+      title: "Generate Weekly Salary",
+      description: `Calculate salary for all employees for the week: ${weekLabel}.`,
+    },
+    monthly: {
+      title: "Generate Monthly Payroll",
+      description: `Calculate payroll for all employees for ${monthLabel}.`,
+    },
   }
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-foreground mb-2">Employee 360° Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Select an employee to view details and attendance analytics</p>
+    <div className="space-y-4">
+
+      {/* ── Shared date bar ───────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between bg-white rounded-xl border border-gray-200 px-4 py-2.5">
+        <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Selected Date</span>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => goDate(-1)}
+            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+
+          {/* Calendar trigger — highlighted blue when open */}
+          <Popover open={calOpen} onOpenChange={setCalOpen}>
+            <PopoverTrigger asChild>
+              <button className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors">
+                <div className="" />
+                {format(selectedDate, "EEE, MMM dd yyyy")}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <MultiViewCalendar selected={selectedDate}
+                onSelect={d => { setSelectedDate(d); setCalOpen(false) }}
+                fromYear={2020} toYear={2030} />
+            </PopoverContent>
+          </Popover>
+
+          <button onClick={() => goDate(1)} disabled={isToday}
+            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 disabled:opacity-30 transition-colors">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+
+          <span className="ml-1 text-[11px] text-gray-400 hidden sm:inline">
+            Week: <span className="font-medium text-gray-600">{weekLabel}</span>
+          </span>
+        </div>
+      </div>
+
+      {/* ── Punches + Daily Salary ─────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
+
+        {/* Punch Records */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+            <div className="flex items-center gap-2">
+              <Clock className="h-3.5 w-3.5 text-indigo-500" />
+              <span className="text-xs font-semibold text-gray-600">Punch Records</span>
+              <span className="text-[11px] text-gray-400">{punches.length} punch{punches.length !== 1 ? "es" : ""}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => fetchPunches(dateStr)}
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-200 text-gray-400">
+                <RefreshCw className="h-3 w-3" />
+              </button>
+              {!isToday && (
+                <button onClick={() => setAddOpen(true)}
+                  className="flex items-center gap-1 text-[11px] bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded font-medium">
+                  <Plus className="h-3 w-3" /> Add
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            {loadingP ? (
+              <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-gray-300" /></div>
+            ) : errorP ? (
+              <div className="px-4 py-6 text-center text-sm text-red-500">{errorP}</div>
+            ) : punches.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-gray-400">No punches for {format(selectedDate, "MMM dd, yyyy")}</div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50">
+                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide w-12">Type</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Time</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Source</th>
+                    {!isToday && <th className="px-3 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {punches.map(p => (
+                    <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-3 py-2">
+                        <span className={["text-[10px] font-bold px-1.5 py-0.5 rounded",
+                          p.type === "IN" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"].join(" ")}>
+                          {p.type}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs text-gray-700">{p.time}</td>
+                      <td className="px-3 py-2 text-xs text-gray-500">{p.source}</td>
+                      {!isToday && (
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => { setActivePunch(p); setEditOpen(true) }}
+                              className="p-1 rounded text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors">
+                              <Edit2 className="h-2.5 w-2.5" />
+                            </button>
+                            <button onClick={() => { setActivePunch(p); setDeleteOpen(true) }}
+                              className="p-1 rounded text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 transition-colors">
+                              <Trash2 className="h-2.5 w-2.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
 
-        {isLoading && (
-          <div className="flex flex-col items-center justify-center py-12">
-            <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
-            <p className="text-lg font-medium text-foreground">Loading employees...</p>
-            <p className="text-sm text-muted-foreground mt-1">Please wait while we fetch the data</p>
-          </div>
-        )}
-
-        {error && (
-          <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6">
-            <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
-          </div>
-        )}
-
-        {!isLoading && !error && (
-          <>
-            {/* Search Bar */}
-            <div className="mb-6 relative">
-              <div className="flex gap-2 items-center bg-card border border-input rounded-lg shadow-sm h-12 max-w-md">
-                <div className="px-3 flex-shrink-0">
-                  <Search size={20} className="text-muted-foreground" />
-                </div>
-                <input
-                  type="text"
-                  placeholder="Search by name, role, or phone..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="flex-1 bg-transparent text-foreground text-sm focus:outline-none placeholder-muted-foreground min-w-0"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery("")}
-                    className="px-3 text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Employee List Table */}
-            <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-muted/50 border-b border-border">
-                    <tr>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-foreground">Name</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-foreground">Role</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-foreground">Register Date</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-foreground">Email</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-foreground">PAN</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-foreground">Aadhaar</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-foreground">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {filteredEmployees.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground">
-                          No employees found
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredEmployees.map((employee) => (
-                        <tr
-                          key={employee.id}
-                          onClick={() => setSelectedEmployee(employee)}
-                          className={`hover:bg-muted/30 transition-colors cursor-pointer ${
-                            selectedEmployee?.id === employee.id ? "bg-blue-50 dark:bg-blue-950" : ""
-                          }`}
-                        >
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-400 flex items-center justify-center text-white font-semibold">
-                                {employee.name.charAt(0).toUpperCase()}
-                              </div>
-                              <div>
-                                <div className="font-medium text-foreground">{employee.name}</div>
-                                <div className="text-xs text-muted-foreground">{employee.phone}</div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="text-sm text-foreground font-medium">{employee.role}</span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="text-sm text-foreground">{formatDate(employee.createdAt)}</span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="text-sm text-foreground">{employee.email || "—"}</span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="text-sm text-foreground font-mono">{employee.pan || "—"}</span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="text-sm text-foreground font-mono">{employee.aadhaar || "—"}</span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <Badge
-                              variant={employee.status === "Active" ? "default" : "secondary"}
-                              className={
-                                employee.status === "Active"
-                                  ? "bg-green-100 text-green-800 hover:bg-green-100 border-green-300"
-                                  : "bg-red-100 text-red-800 hover:bg-red-100 border-red-300"
-                              }
-                            >
-                              {employee.status}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Results Summary */}
-            <div className="text-sm text-muted-foreground">
-              Showing {filteredEmployees.length} of {employees.length} employees
-            </div>
-          </>
-        )}
-
-        {selectedEmployee && (
-          <div className="mt-12 pt-8 border-t border-border space-y-6">
-            <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950/20 dark:to-purple-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-6">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-purple-400 flex items-center justify-center text-white text-2xl font-bold">
-                    {selectedEmployee.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <h2 className="text-2xl font-bold text-foreground">{selectedEmployee.name}</h2>
-                    <p className="text-sm text-muted-foreground">Role: {selectedEmployee.role}</p>
-                    <p className="text-sm text-muted-foreground">
-                      Active Since: {formatDate(selectedEmployee.createdAt)}
-                    </p>
-                  </div>
-                </div>
-                <Badge
-                  variant={selectedEmployee.status === "Active" ? "default" : "secondary"}
-                  className={
-                    selectedEmployee.status === "Active"
-                      ? "bg-green-100 text-green-800 hover:bg-green-100 border-green-300 h-fit"
-                      : "bg-red-100 text-red-800 hover:bg-red-100 border-red-300 h-fit"
-                  }
-                >
-                  {selectedEmployee.status}
-                </Badge>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-              {/* LEFT PANEL (40%) - Employee Details */}
-              <div className="lg:col-span-2 space-y-4">
-                {/* Shift Timing */}
-                {selectedEmployee.regularShifts.length > 0 && (
-                  <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-                    <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-                      <ShuffleIcon size={16} className="text-green-600 dark:text-green-400" />
-                      Shift Timing
-                    </p>
-                    <div className="space-y-2">
-                      {selectedEmployee.regularShifts.map((shift) => (
-                        <div
-                          key={shift.id}
-                          className="px-3 py-2 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-700"
-                        >
-                          <p className="text-sm font-medium text-foreground">{shift.shiftName}</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            ₹{shift.amount}/{shift.amountType}
-                            {shift.extraAllowance ? ` + ₹${shift.extraAllowance}` : ""}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Overtime Details */}
-                {selectedEmployee.overtimeShifts.length > 0 && (
-                  <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-                    <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-                      <LucideTimerOffIcon size={16} className="text-orange-600 dark:text-orange-400" />
-                      Overtime Details
-                    </p>
-                    <div className="space-y-2">
-                      {selectedEmployee.overtimeShifts.map((shift) => (
-                        <div
-                          key={shift.id}
-                          className="px-3 py-2 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-700"
-                        >
-                          <p className="text-sm font-medium text-foreground">{shift.shiftName}</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            ₹{shift.amount}/{shift.amountType}
-                            {shift.extraAllowance ? ` + ₹${shift.extraAllowance}` : ""}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Salary Frequency */}
-                <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-                  <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <IndianRupeeIcon size={16} className="text-pink-600 dark:text-pink-400" />
-                    Salary & Workday Policy
-                  </p>
-                  <div className="space-y-2">
-                    <div className="px-3 py-2 rounded-lg bg-pink-50 dark:bg-pink-950/20 border border-pink-200 dark:border-pink-700">
-                      <p className="text-xs text-muted-foreground">Frequency</p>
-                      <p className="text-sm font-medium text-foreground">
-                        {selectedEmployee.salaryConfig?.frequency || "Not Set"}
-                      </p>
-                    </div>
-                    <div className="px-3 py-2 rounded-lg bg-pink-50 dark:bg-pink-950/20 border border-pink-200 dark:border-pink-700">
-                      <p className="text-xs text-muted-foreground">Workday Policy</p>
-                      <p className="text-sm font-medium text-foreground">
-                        {selectedEmployee.salaryConfig?.workdayPolicy || "Not Set"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-                  <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <IndianRupeeIcon size={16} className="text-blue-600 dark:text-blue-400" />
-                    Earnings Summary
-                  </p>
-                  <div className="space-y-2">
-                    <div className="px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-700">
-                      <p className="text-xs text-muted-foreground">Regular Earnings</p>
-                      <p className="text-lg font-bold text-foreground">
-                        ₹{calculateEarnings(selectedEmployee).regular.toLocaleString()}
-                      </p>
-                    </div>
-                    <div className="px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-700">
-                      <p className="text-xs text-muted-foreground">OT Earnings</p>
-                      <p className="text-lg font-bold text-orange-600 dark:text-orange-400">
-                        ₹{calculateEarnings(selectedEmployee).overtime.toLocaleString()}
-                      </p>
-                    </div>
-                    <div className="px-3 py-2 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-700">
-                      <p className="text-xs text-muted-foreground">Net Pay</p>
-                      <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                        ₹{calculateEarnings(selectedEmployee).total.toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-                  <p className="text-sm font-semibold text-foreground">Last 10 Attendance Records</p>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead className="text-muted-foreground">
-                        <tr className="border-b border-border">
-                          <th className="text-left py-2 px-2">Date</th>
-                          <th className="text-left py-2 px-2">In</th>
-                          <th className="text-left py-2 px-2">Out</th>
-                          <th className="text-left py-2 px-2">Hours</th>
-                        </tr>
-                      </thead>
-                      <tbody className="text-foreground">
-                        {[
-                          { date: "2025-01-20", in: "09:00", out: "18:00", hours: "9h" },
-                          { date: "2025-01-19", in: "08:45", out: "17:45", hours: "9h" },
-                          { date: "2025-01-18", in: "09:15", out: "18:15", hours: "9h" },
-                          { date: "2025-01-17", in: "09:00", out: "18:00", hours: "9h" },
-                          { date: "2025-01-16", in: "Absent", out: "—", hours: "0h" },
-                          { date: "2025-01-15", in: "09:00", out: "20:00", hours: "11h" },
-                          { date: "2025-01-14", in: "09:00", out: "18:00", hours: "9h" },
-                          { date: "2025-01-13", in: "08:30", out: "17:45", hours: "9.25h" },
-                          { date: "2025-01-12", in: "Holiday", out: "—", hours: "0h" },
-                          { date: "2025-01-11", in: "09:00", out: "18:00", hours: "9h" },
-                        ].map((record, idx) => (
-                          <tr key={idx} className="border-b border-border/50 hover:bg-muted/30">
-                            <td className="py-2 px-2">{record.date}</td>
-                            <td className="py-2 px-2">{record.in}</td>
-                            <td className="py-2 px-2">{record.out}</td>
-                            <td className="py-2 px-2 font-medium">{record.hours}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-
-              {/* RIGHT PANEL (60%) - Attendance Analytics */}
-              <div className="lg:col-span-3">
-                <AttendanceAnalyticsPanel employeeId={selectedEmployee.id} employeeName={selectedEmployee.name} />
-              </div>
+        {/* Daily Salary */}
+        <div className="xl:col-span-3 bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+            <TrendingUp className="h-3.5 w-3.5 text-green-500" />
+            <span className="text-xs font-semibold text-gray-600">Daily Salary</span>
+            <span className="text-[11px] text-gray-400">{dateStr}</span>
+            <div className="ml-auto">
+              <button
+                onClick={() => setGenDialog("daily")}
+                className="flex items-center gap-1.5 text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded-lg transition-colors"
+              >
+                <Zap className="h-3 w-3" />
+                Generate
+              </button>
             </div>
           </div>
-        )}
+          <DailySalaryTable employee={employee} token={token} date={dateStr} refreshKey={dailyKey} />
+        </div>
+      </div>
+
+      {/* ── Weekly Salary ─────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+          <Activity className="h-3.5 w-3.5 text-indigo-500" />
+          <span className="text-xs font-semibold text-gray-600">Weekly Salary</span>
+          <span className="text-[11px] text-gray-400">{weekLabel}</span>
+          <span className="text-[10px] text-gray-400 hidden sm:inline">· click row for daily detail</span>
+          <div className="ml-auto">
+            <button
+              onClick={() => setGenDialog("weekly")}
+              className="flex items-center gap-1.5 text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <Zap className="h-3 w-3" />
+              Generate
+            </button>
+          </div>
+        </div>
+        <WeeklySalaryTable employee={employee} token={token} date={selectedDate} refreshKey={weeklyKey} />
+      </div>
+
+      {/* ── Monthly Payroll ───────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+          <DollarSign className="h-3.5 w-3.5 text-violet-500" />
+          <span className="text-xs font-semibold text-gray-600">Monthly Payroll</span>
+          <span className="text-[11px] text-gray-400">{dateToMonthStr(selectedDate)}</span>
+          <span className="text-[10px] text-gray-400 hidden sm:inline">· click row for weekly detail</span>
+          <div className="ml-auto">
+            <button
+              onClick={() => setGenDialog("monthly")}
+              className="flex items-center gap-1.5 text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <Zap className="h-3 w-3" />
+              Generate
+            </button>
+          </div>
+        </div>
+        <MonthlySalaryTable employee={employee} token={token} date={selectedDate} refreshKey={monthlyKey} />
+      </div>
+
+      {/* ── Generate confirmation dialog ──────────────────────────────────── */}
+      {genDialog && (
+        <GenerateDialog
+          open={!!genDialog}
+          onClose={() => setGenDialog(null)}
+          title={genMeta[genDialog].title}
+          description={genMeta[genDialog].description}
+          onConfirm={handleGenerate}
+          generating={generating}
+        />
+      )}
+
+      {/* Punch modals */}
+      <PunchAddModal open={addOpen} onOpenChange={setAddOpen} allPunches={punches}
+        workDate={dateStr} employeeId={employee.employeeId} authToken={token}
+        onAdd={() => {}} onAddPair={() => {}} onRefresh={() => fetchPunches(dateStr)} />
+      {activePunch && <>
+        <PunchEditModal open={editOpen} onOpenChange={setEditOpen} punch={activePunch}
+          allPunches={punches} workDate={dateStr} onSave={() => {}} onRefresh={() => fetchPunches(dateStr)} />
+        <PunchDeleteModal open={deleteOpen} onOpenChange={setDeleteOpen}
+          punch={activePunch} onConfirm={handleDelete} />
+      </>}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Employee Detail Panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+function EmployeeDetailPanel({ employee, token, onUpdated }: {
+  employee: ApiEmployee; token: string; onUpdated: (e: ApiEmployee) => void
+}) {
+  const isActive = employee.status === "ACTIVE"
+  return (
+    <div className="space-y-4">
+      {/* Profile header */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="flex items-center gap-4">
+          <div className={["w-12 h-12 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0",
+            isActive ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"].join(" ")}>
+            {initials(employee.employeeName)}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base font-bold text-gray-900">{employee.employeeName}</h2>
+              <span className={["inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                isActive ? "bg-green-50 text-green-700 border border-green-200" : "bg-gray-100 text-gray-500 border border-gray-200"].join(" ")}>
+                {isActive ? <CheckCircle2 className="h-2.5 w-2.5" /> : <XCircle className="h-2.5 w-2.5" />}
+                {isActive ? "Active" : "Inactive"}
+              </span>
+            </div>
+            <div className="text-xs text-gray-500 mt-0.5">{employee.role || "—"}</div>
+            <div className="text-[11px] text-gray-400 font-mono">{employee.employeeId}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3-col info row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <PersonalInfoCard employee={employee} onUpdated={onUpdated} />
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+            <Building2 className="h-3.5 w-3.5 text-blue-500" />
+            <span className="text-xs font-semibold text-gray-600">Shift & Salary Config</span>
+          </div>
+          <div className="px-4 py-3 space-y-2">
+            {(employee.regularShifts || []).map((s, i) => (
+              <div key={i} className="flex items-center justify-between bg-blue-50 rounded-lg px-3 py-2">
+                <div>
+                  <div className="text-xs font-semibold text-blue-800">{s.shiftName}</div>
+                  <div className="text-[11px] text-blue-500 mt-0.5">{s.amountType}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-bold text-blue-700">₹{s.amount}</div>
+                  {s.extraAllowance > 0 && <div className="text-[11px] text-blue-400">+₹{s.extraAllowance}</div>}
+                </div>
+              </div>
+            ))}
+            {(employee.overtimeShifts || []).map((s, i) => (
+              <div key={i} className="flex items-center justify-between bg-orange-50 rounded-lg px-3 py-2">
+                <div>
+                  <div className="text-xs font-semibold text-orange-800">{s.shiftName}</div>
+                  <div className="text-[11px] text-orange-500 mt-0.5">OT · {s.amountType}</div>
+                </div>
+                <div className="text-xs font-bold text-orange-700">₹{s.amount}</div>
+              </div>
+            ))}
+            <div className="flex items-center gap-2 pt-1 flex-wrap">
+              <span className="text-[11px] text-gray-400">Frequency:</span>
+              <span className="text-[11px] font-medium text-gray-700">{employee.salaryFrequency}</span>
+              <span className="text-[11px] text-gray-300 mx-1">·</span>
+              <span className="text-[11px] text-gray-400">Policy:</span>
+              <span className="text-[11px] font-medium text-gray-700 truncate">{employee.workdayPolicy}</span>
+            </div>
+          </div>
+        </div>
+        <RolePermissionsCard employee={employee} token={token} />
+      </div>
+
+      <SalaryAndPunchSection employee={employee} token={token} />
+      <WarningsSection employee={employee} token={token} />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function Employee360Dashboard() {
+  const { auth } = useAuth()
+  const [employees, setEmployees] = useState<ApiEmployee[]>([])
+  const [selected, setSelected]   = useState<ApiEmployee | null>(null)
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState<string | null>(null)
+  const [mobileDetail, setMobileDetail] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
+  useEffect(() => {
+    if (!auth?.token) return
+    fetch(`${BASE}/api/employees/getAllEmployees`, { headers: { Authorization: `Bearer ${auth.token}` } })
+      .then(r => r.ok ? r.json() : Promise.reject("Failed"))
+      .then(setEmployees)
+      .catch(() => setError("Failed to load employees. Please try again."))
+      .finally(() => setLoading(false))
+  }, [auth?.token])
+
+  const handleSelect  = (emp: ApiEmployee) => { setSelected(emp); setMobileDetail(true) }
+  const handleUpdated = (updated: ApiEmployee) => {
+    setEmployees(prev => prev.map(e => e.id === updated.id ? updated : e))
+    setSelected(updated)
+  }
+
+  return (
+    <div className="flex flex-col bg-gray-50" style={{ height: "calc(100vh - 56px)" }}>
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 px-5 py-3.5 flex-shrink-0 shadow-sm">
+        <div className="flex items-center gap-3">
+          {mobileDetail && selected && (
+            <button onClick={() => setMobileDetail(false)} className="lg:hidden flex items-center gap-1 text-sm text-blue-600 mr-1 hover:text-blue-700">
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+          )}
+          <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center flex-shrink-0 shadow-md">
+            <BarChart3 className="h-4 w-4 text-white" />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-gray-900">Employee 360° Profile</h1>
+            <p className="text-xs text-gray-500">
+              {selected ? `Currently viewing: ${selected.employeeName}` : "Select an employee from the list to begin"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <div className={[
+          "flex-shrink-0 bg-white border-r border-gray-200 flex-col lg:flex transition-all duration-200",
+          mobileDetail ? "hidden" : "flex",
+        ].join(" ")} style={{ width: sidebarCollapsed ? "40px" : "272px", minWidth: sidebarCollapsed ? "40px" : "272px" }}>
+          {sidebarCollapsed ? (
+            <div className="flex flex-col items-center pt-3">
+              <button onClick={() => setSidebarCollapsed(false)} title="Expand sidebar"
+                className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 text-gray-400">
+                <PanelLeftOpen className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Employees</span>
+                <button onClick={() => setSidebarCollapsed(true)} title="Collapse sidebar"
+                  className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-100 text-gray-400">
+                  <PanelLeftClose className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <EmployeeListPanel employees={employees} selected={selected} onSelect={handleSelect} loading={loading} error={error} />
+            </>
+          )}
+        </div>
+
+        {/* Detail */}
+        <div className={["flex-1 overflow-y-auto p-5 lg:block", mobileDetail ? "block" : "hidden"].join(" ")}>
+          {selected && auth?.token ? (
+            <EmployeeDetailPanel employee={selected} token={auth.token} onUpdated={handleUpdated} />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-center">
+              <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mb-4">
+                <User className="h-8 w-8 text-blue-500" />
+              </div>
+              <h3 className="text-base font-bold text-gray-800 mb-2">No Employee Selected</h3>
+              <p className="text-sm text-gray-600 max-w-sm leading-relaxed">
+                Choose an employee from the sidebar to view their complete profile including punches, salary details, and warnings.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
