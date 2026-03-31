@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { AlertCircle, CalendarIcon, Zap } from "lucide-react"
 import { useAuth } from "@/lib/contexts/auth-context"
+import { useHasAction, MODULES, ACTIONS } from "@/lib/permission-utils"
 import { SearchableComboBox } from "./searchable-combo-box"
 import { MultiViewCalendar } from "./multi-view-calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -67,6 +68,7 @@ function parseHrStr(s: string | null | undefined): number {
 
 export function DailySalaryScreen() {
   const { auth } = useAuth()
+  const hasGenerateSalary = useHasAction(MODULES.SALARY, ACTIONS.SALARY_GENERATE)
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [selectedEmployee, setSelectedEmployee] = useState("")
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
@@ -90,6 +92,7 @@ export function DailySalaryScreen() {
         `http://3.109.152.136:8080/api/payrolls/getDailySalary?date=${d}`,
         { headers: { Authorization: `Bearer ${auth.token}` } },
       )
+							  
       if (!res.ok) throw new Error(`API error: ${res.statusText}`)
       setData(await res.json())
     } catch (err) {
@@ -200,15 +203,17 @@ export function DailySalaryScreen() {
             </Popover>
           </div>
 
-          <div className="ml-auto">
-            <Button
-              onClick={() => setShowGenerateDialog(true)}
-              className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium gap-1.5"
-            >
-              <Zap className="h-3.5 w-3.5" />
-              Generate Salary
-            </Button>
-          </div>
+          {hasGenerateSalary && (
+            <div className="ml-auto">
+              <Button
+                onClick={() => setShowGenerateDialog(true)}
+                className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium gap-1.5"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                Generate Salary
+              </Button>
+            </div>
+          )}
 
         </div>
       </div>

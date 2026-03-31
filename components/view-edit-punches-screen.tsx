@@ -180,7 +180,7 @@ export default function ViewEditPunchesScreen() {
     console.log('[v0] fetchEmployees triggered')
     setIsEmployeesLoading(true)
     try {
-      const response = await fetch('http://3.109.152.136:8080/api/employees/getAllEmployees', {
+      const response = await fetch('http://3.109.152.136:8080/api/employees/getAllPermittedEmployees', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -582,7 +582,6 @@ export default function ViewEditPunchesScreen() {
         <div>
           <h1 className="text-3xl font-bold">View & Edit Punches</h1>
           <p className="text-muted-foreground mt-1">Manage Employee Punch Records</p>
-          {isReadOnly && <p className="text-sm text-amber-600 mt-2">View-only access. You cannot edit or save punch data.</p>}
         </div>
 
         {/* Date Header with Navigation — Refresh button moved next to calendar */}
@@ -639,7 +638,7 @@ export default function ViewEditPunchesScreen() {
 
       {/* Filters */}
       <Card className="p-6 space-y-4">
-        <h2 className="text-lg font-semibold">Filters</h2>
+        
 
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
@@ -647,12 +646,6 @@ export default function ViewEditPunchesScreen() {
           </div>
         )}
 
-        {/* Labels row */}
-        <div className="flex items-center gap-3 mb-1.5">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-48">Employee</span>
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-48">Source</span>
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-24">Action</span>
-        </div>
 
         {/* Inputs row */}
         <div className="flex items-center gap-3">
@@ -739,7 +732,7 @@ export default function ViewEditPunchesScreen() {
                 <TableHead>Type</TableHead>
                 <TableHead>Time</TableHead>
                 <TableHead>Source</TableHead>
-                <TableHead>Actions</TableHead>
+                {canEditPunches && <TableHead>Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -760,40 +753,38 @@ export default function ViewEditPunchesScreen() {
                   </TableCell>
                   <TableCell className="font-mono">{punch.time || 'N/A'}</TableCell>
                   <TableCell className="text-sm">{punch.source}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      {canEditPunches && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setSelectedPunch(punch)
-                              setIsEditModalOpen(true)
-                            }}
-                            className="gap-1"
-                            disabled={isSelectedDateToday()}
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            Edit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1 text-red-600 hover:text-red-700 bg-transparent"
-                            onClick={() => {
-                              setSelectedPunch(punch)
-                              setIsDeleteModalOpen(true)
-                            }}
-                            disabled={isSelectedDateToday()}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            Delete
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </TableCell>
+                  {canEditPunches && (
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedPunch(punch)
+                            setIsEditModalOpen(true)
+                          }}
+                          className="gap-1"
+                          disabled={isSelectedDateToday()}
+                        >
+                          <Edit2 className="w-3 h-3" />
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1 text-red-600 hover:text-red-700 bg-transparent"
+                          onClick={() => {
+                            setSelectedPunch(punch)
+                            setIsDeleteModalOpen(true)
+                          }}
+                          disabled={isSelectedDateToday()}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>

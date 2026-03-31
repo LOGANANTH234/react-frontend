@@ -14,6 +14,7 @@ export const MODULES = {
   HOLIDAY_MANAGEMENT: "HOLIDAY_MANAGEMENT",
   VIEW_EDIT_PUNCHES: "VIEW_EDIT_PUNCHES",
   SALARY: "SALARY",
+  WARNING: "WARNING",
 } as const
 
 // Action codes from backend
@@ -34,6 +35,12 @@ export const ACTIONS = {
   EMPLOYEE_VIEW: "EMPLOYEE_VIEW",
   EMPLOYEE_UPDATE_PASSWORD: "EMPLOYEE_UPDATE_PASSWORD",
   EMPLOYEE_DEACTIVATE: "EMPLOYEE_DEACTIVATE",
+
+  // Employee 360
+  EMP360_VIEW: "EMP360_VIEW",
+  EMP360_EDIT_PERSONAL_INFO: "EMP360_EDIT_PERSONAL_INFO",
+  EMP360_GENERATE_SALARY: "EMP360_GENERATE_SALARY",
+  EMP360_EDIT_PUNCH: "EMP360_EDIT_PUNCH",
 
   // Live Attendance
   LIVE_VIEW_SUMMARY: "LIVE_VIEW_SUMMARY",
@@ -66,6 +73,10 @@ export const ACTIONS = {
 
   // Salary
   SALARY_VIEW: "SALARY_VIEW",
+  SALARY_GENERATE: "SALARY_GENERATE",
+
+  // Warning
+  WARNING_VIEW: "WARNING_VIEW",
 } as const
 
 export function getAllModulesWithActions() {
@@ -99,8 +110,10 @@ export function getAllModulesWithActions() {
       moduleCode: MODULES.EMPLOYEE_360,
       moduleName: "Employee 360°",
       actions: [
-        { actionCode: "EMPLOYEE_360_VIEW", actionName: "View Employee 360" },
-        { actionCode: "EMPLOYEE_360_EDIT", actionName: "Edit Employee 360" },
+        { actionCode: ACTIONS.EMP360_VIEW, actionName: "View Employee 360 Profile" },
+        { actionCode: ACTIONS.EMP360_EDIT_PERSONAL_INFO, actionName: "Edit Personal Info" },
+        { actionCode: ACTIONS.EMP360_GENERATE_SALARY, actionName: "Generate Salary" },
+        { actionCode: ACTIONS.EMP360_EDIT_PUNCH, actionName: "Edit Punch" },
       ],
     },
     {
@@ -161,6 +174,14 @@ export function getAllModulesWithActions() {
       moduleName: "Salary",
       actions: [
         { actionCode: ACTIONS.SALARY_VIEW, actionName: "View Salary" },
+        { actionCode: ACTIONS.SALARY_GENERATE, actionName: "Generate Salary" },
+      ],
+    },
+    {
+      moduleCode: MODULES.WARNING,
+      moduleName: "Warning",
+      actions: [
+        { actionCode: ACTIONS.WARNING_VIEW, actionName: "View Warning" },
       ],
     },
   ]

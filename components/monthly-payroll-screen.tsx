@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { AlertCircle, CalendarIcon, Zap, AlertTriangle, Clock } from "lucide-react"
 import { useAuth } from "@/lib/contexts/auth-context"
+import { useHasAction, MODULES, ACTIONS } from "@/lib/permission-utils"
 import { SearchableComboBox } from "./searchable-combo-box"
 import { MonthYearCalendar } from "./month-year-calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -28,7 +29,7 @@ interface ApiResponse {
   regularSalaryTotal: number
   overtimeSalaryTotal: number
   allowanceTotal: number
-  PenaltyMins: string         // "1h:0m"  ← backend field is PenaltyMins (PascalCase)
+  penaltyMins: string         // "1h:0m"  ← backend field is penaltyMins (camelCase)
   penaltyAmount: number
   warningTotal: number
   netPay: number
@@ -73,6 +74,7 @@ function formatGeneratedAt(ts: string | null): string {
 
 export function MonthlyPayrollScreen() {
   const { auth } = useAuth()
+  const hasGenerateSalary = useHasAction(MODULES.SALARY, ACTIONS.SALARY_GENERATE)
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [selectedEmployee, setSelectedEmployee] = useState("")
@@ -80,6 +82,8 @@ export function MonthlyPayrollScreen() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showGenerateDialog, setShowGenerateDialog] = useState(false)
+  const [validationWarning, setValidationWarning] = useState<string | null>(null)
+  const [generatingDaily, setGeneratingDaily] = useState(false)
 
   // ── fetch ─────────────────────────────────────────────────────────────────
 
@@ -103,6 +107,48 @@ export function MonthlyPayrollScreen() {
   useEffect(() => { if (auth?.token) fetchData(selectedDate) }, [selectedDate, auth?.token])
 
   // ── generate ──────────────────────────────────────────────────────────────
+
+  const todayStr = () => new Date().toISOString().split("T")[0]
+
+  const checkTodayDailySalary = async (): Promise<boolean> => {
+    if (!auth?.token) return false
+    try {
+      const res = await fetch(
+        `http://3.109.152.136:8080/api/payrolls/getDailySalary?date=${todayStr()}`,
+        { headers: { Authorization: `Bearer ${auth.token}` } }
+      )
+      if (!res.ok) return false
+      const data = await res.json()
+      return Array.isArray(data) && data.length > 0
+    } catch { return false }
+  }
+
+  const handleOpenGenerate = async () => {
+    const calculated = await checkTodayDailySalary()
+    if (!calculated) {
+      setValidationWarning("Today's salary has not been calculated. Please calculate today's salary before generating the monthly salary.")
+    } else {
+      setValidationWarning(null)
+    }
+    setShowGenerateDialog(true)
+  }
+
+  const handleValidationProceed = async () => {
+    if (!auth?.token) return
+    setValidationWarning(null)
+    setGeneratingDaily(true)
+    try {
+      const res = await fetch(
+        `http://3.109.152.136:8080/api/payrolls/calculate-daily-salary?date=${todayStr()}`,
+        { method: "POST", headers: { Authorization: `Bearer ${auth.token}` } }
+      )
+      if (!res.ok) throw new Error(await res.text())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate daily salary")
+    } finally {
+      setGeneratingDaily(false)
+    }
+  }
 
   const handleConfirmGenerate = async () => {
     if (!auth?.token) { setShowGenerateDialog(false); return }
@@ -168,11 +214,18 @@ export function MonthlyPayrollScreen() {
               </PopoverContent>
             </Popover>
           </div>
-          <div className="ml-auto">
-            <Button onClick={() => setShowGenerateDialog(true)} className="bg-blue-600 hover:bg-blue-700 text-white">
-              <Zap className="mr-2 h-4 w-4" /> Generate Salary
-            </Button>
-          </div>
+								   
+																													 
+															  
+					 
+				
+          {hasGenerateSalary && (
+            <div className="ml-auto">
+              <Button onClick={handleOpenGenerate} className="bg-blue-600 hover:bg-blue-700 text-white">
+                <Zap className="mr-2 h-4 w-4" /> Generate Salary
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -183,7 +236,9 @@ export function MonthlyPayrollScreen() {
         </div>
       )}
 
+      {/* ── Summary cards ───────────────────────────────────────────────── */}
 
+      
 
       {/* ── Table ───────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
@@ -216,6 +271,7 @@ export function MonthlyPayrollScreen() {
                   <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Penalty (₹)</th>
                   {/* Net */}
                   <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 whitespace-nowrap">Net Salary</th>
+																															
                 </tr>
               </thead>
               <tbody>
@@ -261,8 +317,8 @@ export function MonthlyPayrollScreen() {
                           : <span className="text-gray-300 text-xs">—</span>}
                       </td>
                       <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
-                        {hasPenaltyMins(r.PenaltyMins)
-                          ? <span className="text-red-500 font-medium">{r.PenaltyMins}</span>
+                        {hasPenaltyMins(r.penaltyMins)
+                          ? <span className="text-red-500 font-medium">{r.penaltyMins}</span>
                           : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
@@ -272,6 +328,8 @@ export function MonthlyPayrollScreen() {
                       </td>
                       {/* Net */}
                       <td className="px-5 py-3.5 text-right font-mono font-semibold text-blue-600 whitespace-nowrap">{fmt(r.netPay)}</td>
+										  
+																														   
                     </tr>
                   )
                 }) : (
@@ -300,6 +358,7 @@ export function MonthlyPayrollScreen() {
                     <td className="px-5 py-3 border-r border-gray-300" />
                     <td className="px-5 py-3 text-right font-mono text-red-500 font-medium border-r border-gray-300">{fmt(totals.penalty)}</td>
                     <td className="px-5 py-3 text-right font-mono font-bold text-blue-600">{fmt(totals.net)}</td>
+												
                   </tr>
                 </tfoot>
               )}
@@ -309,19 +368,45 @@ export function MonthlyPayrollScreen() {
       </div>
 
       {/* ── Generate dialog ─────────────────────────────────────────────── */}
-      <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
+      <Dialog open={showGenerateDialog} onOpenChange={v => { setShowGenerateDialog(v); if (!v) setValidationWarning(null) }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Generate Monthly Salary</DialogTitle>
-            <DialogDescription>
-              Salary will be calculated for all employees for{" "}
-              <span className="font-semibold text-slate-900">{monthLabel}</span>.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-3 sm:gap-0">
-            <Button variant="outline" onClick={() => setShowGenerateDialog(false)}>Cancel</Button>
-            <Button onClick={handleConfirmGenerate} className="bg-blue-600 hover:bg-blue-700">Generate</Button>
-          </DialogFooter>
+          {validationWarning ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-amber-700">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  Calculation Required
+                </DialogTitle>
+                <DialogDescription className="text-sm text-gray-700 mt-1 leading-relaxed">
+                  {validationWarning}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 mt-2">
+                <Button variant="outline" onClick={() => { setShowGenerateDialog(false); setValidationWarning(null) }}>Cancel</Button>
+                <Button
+                  onClick={handleValidationProceed}
+                  disabled={generatingDaily}
+                  className="bg-amber-500 hover:bg-amber-600 text-white gap-1.5"
+                >
+                  {generatingDaily ? <><Zap className="h-3.5 w-3.5 animate-spin" /> Calculating…</> : <><Zap className="h-3.5 w-3.5" /> Yes, Calculate Now</>}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Generate Monthly Salary</DialogTitle>
+                <DialogDescription>
+                  Salary will be calculated for all employees for{" "}
+                  <span className="font-semibold text-slate-900">{monthLabel}</span>.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-3 sm:gap-0">
+                <Button variant="outline" onClick={() => setShowGenerateDialog(false)}>Cancel</Button>
+                <Button onClick={handleConfirmGenerate} className="bg-blue-600 hover:bg-blue-700">Generate</Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

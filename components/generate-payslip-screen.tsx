@@ -70,6 +70,9 @@ export function GeneratePayslipScreen() {
   const [pdfPages, setPdfPages]                   = useState<string[]>([])
   const [currentPage, setCurrentPage]             = useState(1)
 
+  // ── Per-employee generate tracking ────────────────────────────────────────
+  const [singleGenStatus, setSingleGenStatus] = useState<Record<string, GenStatus>>({})
+
   // ── Auth header ────────────────────────────────────────────────────────────
   const getAuthHeaders = (): HeadersInit => {
     const token = localStorage.getItem("auth")
@@ -99,22 +102,15 @@ export function GeneratePayslipScreen() {
   }
 
   // ── Build salary calculation URL based on type ─────────────────────────────
-  // Daily:   POST /api/payrolls/generateDailySalary?date=YYYY-MM-DD
-  // Weekly:  POST /api/payrolls/generateWeeklySalary?fromDate=YYYY-MM-DD&toDate=YYYY-MM-DD
-  // Monthly: POST /api/payrolls/generateMonthlySalary?month=YYYY-MM
   const buildCalcUrl = (): string => {
-  if (selectedType === "daily") {
-    return `${SALARY}/calculate-daily-salary?date=${getDateParam()}`
+    if (selectedType === "daily") {
+      return `${SALARY}/calculate-daily-salary?date=${getDateParam()}`
+    }
+    if (selectedType === "weekly") {
+      return `${SALARY}/GenerateWeeklySalary?anyDateInWeek=${getDateParam()}`
+    }
+    return `${SALARY}/generateMonthlyPayroll?month=${getDateParam()}`
   }
-
-  if (selectedType === "weekly") {
-    // your backend expects only one date
-    return `${SALARY}/GenerateWeeklySalary?anyDateInWeek=${getDateParam()}`
-  }
-
-  // monthly
-  return `${SALARY}/generateMonthlyPayroll?month=${getDateParam()}`
-}
 
   // ── Build PDF URLs ─────────────────────────────────────────────────────────
   const buildGenerateUrl = (employeeName: string) => {
@@ -192,8 +188,6 @@ export function GeneratePayslipScreen() {
     })
 
   // ── Salary calculation ─────────────────────────────────────────────────────
-  // Calls the appropriate endpoint (daily / weekly / monthly) via POST.
-  // After success, re-fetches the employee list so amounts are populated.
   const runSalaryCalculation = async (): Promise<boolean> => {
     setCalcPhase("calculating")
     setCalcError(null)
@@ -206,7 +200,6 @@ export function GeneratePayslipScreen() {
       })
       if (!res.ok) throw new Error(`Salary calculation failed (${res.status})`)
 
-      // Re-fetch employee list so totalAmount fields are updated before PDF generation
       const listUrl = `${BASE}/getEmployeesForPayslip?type=${selectedType.toUpperCase()}&date=${getDateParam()}`
       const listRes = await fetch(listUrl, { headers: getAuthHeaders() })
       if (listRes.ok) {
@@ -256,18 +249,15 @@ export function GeneratePayslipScreen() {
   }
 
   // ── Orchestrator: calculate (if needed) → generate PDFs ───────────────────
-  // Triggered by useEffect once showGenerateModal=true & generateStarted=true
   useEffect(() => {
     if (!showGenerateModal || !generateStarted || allEmployeeNames.length === 0) return
-    setGenerateStarted(false) // prevent re-run
+    setGenerateStarted(false)
 
     const run = async () => {
-      // If calcPhase is "calculating" it means we entered via "Yes, Calculate First"
       if (calcPhase === "calculating") {
         const ok = await runSalaryCalculation()
-        if (!ok) return // leave modal open showing the error
+        if (!ok) return
       }
-      // Now generate PDFs for all employees
       await runBulkGenerate(allEmployeeNames)
     }
 
@@ -280,7 +270,7 @@ export function GeneratePayslipScreen() {
     const initialStatus: Record<string, GenStatus> = {}
     allEmployeeNames.forEach(n => { initialStatus[n] = "idle" })
     setGenStatusMap(initialStatus)
-    setCalcPhase(withCalc ? "calculating" : "idle") // "calculating" signals the orchestrator
+    setCalcPhase(withCalc ? "calculating" : "idle")
     setCalcError(null)
     setGenerateStarted(true)
     setShowGenerateModal(true)
@@ -299,7 +289,7 @@ export function GeneratePayslipScreen() {
   // ── Zero-salary dialog actions ─────────────────────────────────────────────
   const handleCalculateAndGenerate = () => {
     setShowZeroSalaryWarning(false)
-    openGenerateModal(true) // withCalc = true → calls salary API first
+    openGenerateModal(true)
   }
 
   const handleGenerateAnyway = () => {
@@ -307,7 +297,38 @@ export function GeneratePayslipScreen() {
     openGenerateModal(false)
   }
 
-  // ── Retry single failed employee ───────────────────────────────────────────
+  // ── Per-row single generate (with 5s reset back to idle after done) ────────
+  const handleGenerateOne = async (employeeName: string) => {
+    setSingleGenStatus(prev => ({ ...prev, [employeeName]: "generating" }))
+    try {
+      const res = await fetch(buildGenerateUrl(employeeName), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      })
+      if (!res.ok) throw new Error(`Generate failed (${res.status})`)
+      const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = objectUrl
+      a.download = `${employeeName}_${selectedType}_${getDateParam()}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(objectUrl)
+      setApiEmployees(prev =>
+        prev.map(e => e.employeeName === employeeName ? { ...e, paySlipGenerated: true } : e))
+      setSingleGenStatus(prev => ({ ...prev, [employeeName]: "done" }))
+      // ✅ Reset back to Generate button after 5 seconds
+      setTimeout(() => {
+        setSingleGenStatus(prev => ({ ...prev, [employeeName]: "idle" }))
+      }, 5000)
+    } catch (err) {
+      console.error("[payslip] single generate error:", err)
+      setSingleGenStatus(prev => ({ ...prev, [employeeName]: "failed" }))
+    }
+  }
+
+  // ── Retry single failed employee (bulk modal) ──────────────────────────────
   const handleRetry = async (name: string) => {
     setGenStatusMap(prev => ({ ...prev, [name]: "generating" }))
     try {
@@ -540,13 +561,6 @@ export function GeneratePayslipScreen() {
             <Button variant="outline" onClick={handleClearFilters} className="rounded-lg h-10 text-sm">
               Clear Filters
             </Button>
-            <Button
-              onClick={handleGenerateClick}
-              disabled={allEmployeeNames.length === 0 || isLoadingEmployees}
-              className="rounded-lg h-10 text-sm bg-blue-600 hover:bg-blue-700"
-            >
-              Generate Payslips
-            </Button>
           </div>
         </CardContent>
       </Card>
@@ -576,6 +590,7 @@ export function GeneratePayslipScreen() {
                       <TableHead className="font-semibold text-foreground h-10 text-right">Amount</TableHead>
                       <TableHead className="font-semibold text-foreground h-10">Status</TableHead>
                       <TableHead className="font-semibold text-foreground h-10 text-center w-16">Preview</TableHead>
+                      <TableHead className="font-semibold text-foreground h-10 text-center w-28">Generate</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -604,6 +619,43 @@ export function GeneratePayslipScreen() {
                             title="Preview payslip">
                             <Eye className="h-4 w-4" />
                           </Button>
+                        </TableCell>
+                        <TableCell className="py-3 text-center">
+                          {(() => {
+                            const st = singleGenStatus[p.employeeName]
+                            if (st === "generating") {
+                              return (
+                                <Button size="sm" disabled className="h-8 rounded-lg text-xs px-3 gap-1.5">
+                                  <Loader2 className="h-3 w-3 animate-spin" /> Generating…
+                                </Button>
+                              )
+                            }
+                            if (st === "done") {
+                              return (
+                                <Button size="sm" variant="outline" disabled
+                                  className="h-8 rounded-lg text-xs px-3 gap-1.5 text-green-700 border-green-300 bg-green-50 cursor-default">
+                                  <CheckCircle2 className="h-3 w-3" /> Done
+                                </Button>
+                              )
+                            }
+                            if (st === "failed") {
+                              return (
+                                <Button size="sm"
+                                  onClick={() => handleGenerateOne(p.employeeName)}
+                                  className="h-8 rounded-lg text-xs px-3 gap-1.5 bg-red-600 hover:bg-red-700 text-white">
+                                  Retry
+                                </Button>
+                              )
+                            }
+                            // idle — default Generate button
+                            return (
+                              <Button size="sm"
+                                onClick={() => handleGenerateOne(p.employeeName)}
+                                className="h-8 rounded-lg text-xs px-3 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white">
+                                Generate
+                              </Button>
+                            )
+                          })()}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -636,6 +688,31 @@ export function GeneratePayslipScreen() {
                       title="Preview payslip">
                       <Eye className="h-4 w-4" />
                     </Button>
+                    {(() => {
+                      const st = singleGenStatus[p.employeeName]
+                      if (st === "generating") {
+                        return (
+                          <Button size="sm" disabled className="h-8 rounded-lg text-xs px-2.5 gap-1 shrink-0">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          </Button>
+                        )
+                      }
+                      if (st === "done") {
+                        return (
+                          <Button size="sm" variant="outline" disabled
+                            className="h-8 rounded-lg text-xs px-2.5 gap-1 text-green-700 border-green-300 bg-green-50 shrink-0 cursor-default">
+                            <CheckCircle2 className="h-3 w-3" />
+                          </Button>
+                        )
+                      }
+                      return (
+                        <Button size="sm"
+                          onClick={() => handleGenerateOne(p.employeeName)}
+                          className="h-8 rounded-lg text-xs px-2.5 bg-blue-600 hover:bg-blue-700 text-white shrink-0">
+                          Gen
+                        </Button>
+                      )
+                    })()}
                   </div>
                 ))}
               </div>
@@ -758,7 +835,6 @@ export function GeneratePayslipScreen() {
       <Dialog
         open={showGenerateModal}
         onOpenChange={(open) => {
-          // Block closing while actively calculating or generating
           if (!open && (
             calcPhase === "calculating" ||
             Object.values(genStatusMap).some(s => s === "generating")
@@ -769,7 +845,6 @@ export function GeneratePayslipScreen() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {/* Title icon reflects overall state */}
               {calcPhase === "calculating" ? (
                 <Loader2 className="h-5 w-5 text-blue-600 shrink-0 animate-spin" />
               ) : calcPhase === "failed" ? (
@@ -801,7 +876,7 @@ export function GeneratePayslipScreen() {
               {calcPhase === "failed" && (
                 <span className="text-red-600">{calcError ?? "Salary calculation failed. Please try again."}</span>
               )}
-              {calcPhase === "done" || calcPhase === "idle" ? (
+              {(calcPhase === "done" || calcPhase === "idle") ? (
                 isAllSettled
                   ? `${doneCount} of ${totalCount} payslip(s) generated successfully${failedCount > 0 ? ` · ${failedCount} failed` : ""}.`
                   : `Processing ${totalCount} employee(s) — please wait.`
@@ -809,7 +884,6 @@ export function GeneratePayslipScreen() {
             </DialogDescription>
           </DialogHeader>
 
-          {/* ── Calculation phase banner ── */}
           {calcPhase === "calculating" && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-700">
               <Loader2 className="h-4 w-4 animate-spin shrink-0" />
@@ -838,7 +912,6 @@ export function GeneratePayslipScreen() {
             </div>
           )}
 
-          {/* Progress bar (only shown once PDF generation starts) */}
           {totalCount > 0 && calcPhase !== "calculating" && calcPhase !== "failed" && (
             <div className="w-full bg-muted rounded-full h-2 overflow-hidden my-1">
               <div
@@ -848,7 +921,6 @@ export function GeneratePayslipScreen() {
             </div>
           )}
 
-          {/* Per-employee rows — greyed out while salary is still calculating */}
           {calcPhase !== "failed" && (
             <div className="space-y-2 max-h-72 overflow-y-auto py-2">
               {allEmployeeNames.map((name, idx) => {
@@ -924,7 +996,6 @@ export function GeneratePayslipScreen() {
 
           <DialogFooter>
             {calcPhase === "failed" ? (
-              /* Calc failed — let user retry the whole flow or dismiss */
               <div className="flex gap-2 w-full">
                 <Button variant="outline" onClick={() => setShowGenerateModal(false)} className="rounded-lg h-10 flex-1">
                   Cancel

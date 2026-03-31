@@ -5,11 +5,11 @@ import { RouteGuard } from '@/components/route-guard'
 import { useHasModule, MODULES } from '@/lib/permission-utils'
 
 export default function WarningsPage() {
-  const hasModuleAccess = useHasModule(MODULES.SALARY)
+  const hasModuleAccess = useHasModule(MODULES.WARNING)
 
   // Route guard - redirect if no module access
   if (!hasModuleAccess) {
-    return <RouteGuard requiredModule={MODULES.SALARY} />
+    return <RouteGuard requiredModule={MODULES.WARNING} />
   }
 
   return (

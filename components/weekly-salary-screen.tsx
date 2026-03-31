@@ -4,8 +4,9 @@ import { useState, useMemo, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
-import { AlertCircle, CalendarIcon, Zap } from "lucide-react"
+import { AlertCircle, AlertTriangle, CalendarIcon, Zap } from "lucide-react"
 import { useAuth } from "@/lib/contexts/auth-context"
+import { useHasAction, MODULES, ACTIONS } from "@/lib/permission-utils"
 import { getWeekStart, getWeekEnd, formatDateShort, getWeekRangeISO } from "@/lib/date-week-utils"
 import { SearchableComboBox } from "./searchable-combo-box"
 import { MultiViewCalendar } from "./multi-view-calendar"
@@ -59,6 +60,7 @@ function attendanceColor(present: number, working: number): string {
 
 export function WeeklySalaryScreen() {
   const { auth } = useAuth()
+  const hasGenerateSalary = useHasAction(MODULES.SALARY, ACTIONS.SALARY_GENERATE)
   const [selectedEmployee, setSelectedEmployee] = useState("")
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
@@ -66,6 +68,8 @@ export function WeeklySalaryScreen() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showGenerateDialog, setShowGenerateDialog] = useState(false)
+  const [validationWarning, setValidationWarning] = useState<string | null>(null)
+  const [generatingDaily, setGeneratingDaily] = useState(false)
 
   const weekRange = useMemo(() => getWeekRangeISO(selectedDate), [selectedDate])
 
@@ -95,6 +99,50 @@ export function WeeklySalaryScreen() {
   useEffect(() => { if (auth?.token) fetchData(weekRange) }, [weekRange, auth?.token])
 
   // ── generate ──────────────────────────────────────────────────────────────
+
+  const todayStr = () => new Date().toISOString().split("T")[0]
+
+  const checkTodayDailySalary = async (): Promise<boolean> => {
+    if (!auth?.token) return false
+    try {
+      const res = await fetch(
+        `http://3.109.152.136:8080/api/payrolls/getDailySalary?date=${todayStr()}`,
+        { headers: { Authorization: `Bearer ${auth.token}` } }
+      )
+      if (!res.ok) return false
+      const data = await res.json()
+      return Array.isArray(data) && data.length > 0
+    } catch { return false }
+  }
+
+  const handleOpenGenerate = async () => {
+    const calculated = await checkTodayDailySalary()
+    if (!calculated) {
+      setValidationWarning("Today's salary has not been calculated. Please calculate today's salary before generating the weekly salary.")
+    } else {
+      setValidationWarning(null)
+    }
+    setShowGenerateDialog(true)
+  }
+
+  const handleValidationProceed = async () => {
+    if (!auth?.token) return
+    setValidationWarning(null)
+    setGeneratingDaily(true)
+    try {
+      const res = await fetch(
+        `http://3.109.152.136:8080/api/payrolls/calculate-daily-salary?date=${todayStr()}`,
+        { method: "POST", headers: { Authorization: `Bearer ${auth.token}` } }
+      )
+      if (!res.ok) throw new Error(await res.text())
+      // Daily done — now proceed to generate weekly
+      setValidationWarning(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate daily salary")
+    } finally {
+      setGeneratingDaily(false)
+    }
+  }
 
   const handleConfirmGenerate = async () => {
     if (!auth?.token) { setShowGenerateDialog(false); return }
@@ -189,15 +237,17 @@ export function WeeklySalaryScreen() {
             </div>
           </div>
 
-          <div className="ml-auto">
-            <Button
-              onClick={() => setShowGenerateDialog(true)}
-              className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium gap-1.5"
-            >
-              <Zap className="h-3.5 w-3.5" />
-              Generate Salary
-            </Button>
-          </div>
+          {hasGenerateSalary && (
+            <div className="ml-auto">
+              <Button
+                onClick={handleOpenGenerate}
+                className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium gap-1.5"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                Generate Salary
+              </Button>
+            </div>
+          )}
 
         </div>
       </div>
@@ -319,6 +369,7 @@ export function WeeklySalaryScreen() {
                           : <span className="text-gray-300">—</span>}
                       </td>
 
+
                       {/* Net salary */}
                       <td className="px-5 py-3.5 text-right font-mono font-semibold text-blue-600 whitespace-nowrap">
                         {fmt(r.netPay)}
@@ -363,19 +414,45 @@ export function WeeklySalaryScreen() {
       </div>
 
       {/* ── Generate dialog ─────────────────────────────────────────────── */}
-      <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
+      <Dialog open={showGenerateDialog} onOpenChange={v => { setShowGenerateDialog(v); if (!v) setValidationWarning(null) }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Generate Weekly Salary</DialogTitle>
-            <DialogDescription>
-              Salary will be calculated for all employees for the week{" "}
-              <span className="font-semibold text-gray-900">{weekRangeDisplay}</span>.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setShowGenerateDialog(false)}>Cancel</Button>
-            <Button onClick={handleConfirmGenerate} className="bg-blue-600 hover:bg-blue-700 text-white">Generate</Button>
-          </DialogFooter>
+          {validationWarning ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-amber-700">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  Calculation Required
+                </DialogTitle>
+                <DialogDescription className="text-sm text-gray-700 mt-1 leading-relaxed">
+                  {validationWarning}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 mt-2">
+                <Button variant="outline" onClick={() => { setShowGenerateDialog(false); setValidationWarning(null) }}>Cancel</Button>
+                <Button
+                  onClick={handleValidationProceed}
+                  disabled={generatingDaily}
+                  className="bg-amber-500 hover:bg-amber-600 text-white gap-1.5"
+                >
+                  {generatingDaily ? <><Zap className="h-3.5 w-3.5 animate-spin" /> Calculating…</> : <><Zap className="h-3.5 w-3.5" /> Yes, Calculate Now</>}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Generate Weekly Salary</DialogTitle>
+                <DialogDescription>
+                  Salary will be calculated for all employees for the week{" "}
+                  <span className="font-semibold text-gray-900">{weekRangeDisplay}</span>.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setShowGenerateDialog(false)}>Cancel</Button>
+                <Button onClick={handleConfirmGenerate} className="bg-blue-600 hover:bg-blue-700 text-white">Generate</Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

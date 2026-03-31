@@ -53,7 +53,7 @@ export const ROUTE_CONFIG = {
     requiredModule: MODULES.VIEW_EDIT_PUNCHES,
   },
   "/warnings": {
-    requiredModule: MODULES.SALARY,
+    requiredModule: MODULES.WARNING,
   },
   "/salary": {
     requiredModule: MODULES.SALARY,

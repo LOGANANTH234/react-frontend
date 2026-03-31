@@ -21,6 +21,7 @@ export function AppNavigation() {
   const hasHolidayManagement = useHasModule(MODULES.HOLIDAY_MANAGEMENT)
   const hasViewEditPunches = useHasModule(MODULES.VIEW_EDIT_PUNCHES)
   const hasSalary = useHasModule(MODULES.SALARY)
+  const hasWarning = useHasModule(MODULES.WARNING)
 
   const allNavItems = [
     {
@@ -142,7 +143,7 @@ export function AppNavigation() {
       activeBg: "bg-amber-500",
       activeText: "text-white",
       hoverBg: "hover:bg-amber-50",
-      hasAccess: hasSalary,
+      hasAccess: hasWarning,
     },
   ]
 

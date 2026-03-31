@@ -4,260 +4,357 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '@/lib/contexts/auth-context'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { CalendarIcon, Loader2 } from 'lucide-react'
-import { format, parseISO, subDays } from 'date-fns'
+import {
+  CalendarIcon, Loader2,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+} from 'lucide-react'
+import { format, parseISO } from 'date-fns'
 import { MultiViewCalendar } from '@/components/multi-view-calendar'
 
 interface AttendanceSummaryRecord {
   id: number
+  employeeId: string
   employeeName: string
   attendanceDate: string
   firstIn: string
   lastOut: string
-  workedMinutes: number
-  breakMinutes: number
+  workedMinutes: string | number   // API returns "11h:12m" string
+  breakMinutes: string | number    // API returns "0h:58m" string
+  liveStatus?: string
 }
 
-interface ApiResponse {
-  id: number
-  employeeName: string
-  attendanceDate: string
-  firstIn: string
-  lastOut: string
-  workedMinutes: number
-  breakMinutes: number
+interface PageResponse {
+  content: AttendanceSummaryRecord[]
+  totalElements: number
+  totalPages: number
+  number: number
+  size: number
 }
+
+const PAGE_SIZE_OPTIONS = [100, 200, 300, 400, 500]
 
 export default function DailyAttendanceSummaryScreen() {
   const { auth } = useAuth()
-  const [summaryData, setSummaryData] = useState<AttendanceSummaryRecord[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   const todayStr = format(new Date(), 'yyyy-MM-dd')
 
-  const [filters, setFilters] = useState({
-    employeeName: 'all',
-    startDate: todayStr,  // ← default: today
-    endDate: todayStr,    // ← default: today
-  })
+  const [summaryData, setSummaryData]                 = useState<AttendanceSummaryRecord[]>([])
+  const [uniqueEmployeeNames, setUniqueEmployeeNames] = useState<string[]>([])
 
-  const [isStartDateCalendarOpen, setIsStartDateCalendarOpen] = useState(false)
-  const [isEndDateCalendarOpen, setIsEndDateCalendarOpen] = useState(false)
+  // Filters
+  const [employeeFilter, setEmployeeFilter] = useState('all')
+  const [startDate, setStartDate]           = useState(todayStr)
+  const [endDate, setEndDate]               = useState(todayStr)
 
-  const startDateObj = parseISO(filters.startDate)
-  const endDateObj = parseISO(filters.endDate)
+  const [isStartCalendarOpen, setIsStartCalendarOpen] = useState(false)
+  const [isEndCalendarOpen, setIsEndCalendarOpen]     = useState(false)
 
-  const uniqueEmployeeNames = Array.from(new Set(summaryData.map(r => r.employeeName))).sort()
+  // Server-side pagination
+  const [pageNo, setPageNo]               = useState(0)
+  const [pageSize, setPageSize]           = useState(100)
+  const [totalElements, setTotalElements] = useState(0)
+  const [totalPages, setTotalPages]       = useState(0)
 
-  const filteredData = summaryData.filter(record => {
-    if (filters.employeeName !== 'all' && record.employeeName !== filters.employeeName) {
-      return false
-    }
-    return true
-  })
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError]         = useState<string | null>(null)
 
-  const fetchSummaryData = async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      if (!auth || !auth.token) {
-        setError('Unauthorized – Please login again.')
-        return
-      }
+  const startDateObj = parseISO(startDate)
+  const endDateObj   = parseISO(endDate)
 
-      const token = auth.token
-      const url = `http://3.109.152.136:8080/api/live-attendance/summary-history?startDate=${filters.startDate}&endDate=${filters.endDate}`
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      })
+  // Reset to page 0 when date range changes
+  useEffect(() => { setPageNo(0) }, [startDate, endDate])
 
-      if (!response.ok) {
-        throw new Error(`API error: ${response.statusText}`)
-      }
-
-      const apiData: ApiResponse[] = await response.json()
-      const transformedData: AttendanceSummaryRecord[] = apiData.map((item) => ({
-        id: item.id,
-        employeeName: item.employeeName,
-        attendanceDate: item.attendanceDate,
-        firstIn: item.firstIn,
-        lastOut: item.lastOut,
-        workedMinutes: item.workedMinutes,
-        breakMinutes: item.breakMinutes,
-      }))
-
-      setSummaryData(transformedData)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
+  // ── fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (auth && auth.token && filters.startDate && filters.endDate) {
-      fetchSummaryData()
+    if (!auth?.token || !startDate || !endDate) return
+
+    const run = async () => {
+      setIsLoading(true)
+      setError(null)
+      try {
+        const params = new URLSearchParams({
+          startDate,
+          endDate,
+          page: String(pageNo),
+          size: String(pageSize),
+        })
+
+        const res = await fetch(
+          `http://3.109.152.136:8080/api/live-attendance/summary-history?${params}`,
+          { headers: { Authorization: `Bearer ${auth.token}` } }
+        )
+        if (!res.ok) throw new Error(`API error: ${res.statusText}`)
+
+        const page: PageResponse = await res.json()
+
+        setSummaryData(page.content || [])
+        setTotalElements(page.totalElements)
+        setTotalPages(page.totalPages)
+
+        // Accumulate employee names across pages
+        setUniqueEmployeeNames(prev => {
+          const merged = new Set([...prev, ...(page.content || []).map(r => r.employeeName)])
+          return Array.from(merged).sort()
+        })
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred')
+        setSummaryData([])
+      } finally {
+        setIsLoading(false)
+      }
     }
-  }, [auth, filters.startDate, filters.endDate])
 
-  const handleStartDateSelect = (date: Date) => {
-    const newDateStr = format(date, 'yyyy-MM-dd')
-    setFilters(prev => ({ ...prev, startDate: newDateStr }))
-    setIsStartDateCalendarOpen(false)
+    run()
+  }, [auth, startDate, endDate, pageNo, pageSize])
+
+  // Client-side employee filter within current page
+  const filteredData = summaryData.filter(r =>
+    employeeFilter === 'all' || r.employeeName === employeeFilter
+  )
+
+  const startItem = totalElements === 0 ? 0 : pageNo * pageSize + 1
+  const endItem   = Math.min((pageNo + 1) * pageSize, totalElements)
+
+  // Compute totalPages client-side to guard against stale backend values
+  const computedTotalPages = totalElements === 0 ? 0 : Math.ceil(totalElements / pageSize)
+  const isFirstPage = pageNo === 0
+  const isLastPage  = endItem >= totalElements
+
+  const formatDateTime = (s: string) => {
+    if (!s) return 'N/A'
+    try { return format(parseISO(s), 'MMM dd, yyyy HH:mm') } catch { return s }
   }
 
-  const handleEndDateSelect = (date: Date) => {
-    const newDateStr = format(date, 'yyyy-MM-dd')
-    setFilters(prev => ({ ...prev, endDate: newDateStr }))
-    setIsEndDateCalendarOpen(false)
-  }
-
-  const formatDateTime = (dateTimeStr: string) => {
-    if (!dateTimeStr) return 'N/A'
-    try {
-      const date = parseISO(dateTimeStr)
-      return format(date, 'MMM dd, yyyy HH:mm')
-    } catch {
-      return dateTimeStr
+  // API returns either a string like "11h:12m" or a number of minutes
+  const formatDuration = (val: string | number | undefined) => {
+    if (val === null || val === undefined || val === '') return '—'
+    if (typeof val === 'string') {
+      const cleaned = val.replace(':', ' ').trim()
+      if (cleaned === '0h 0m' || cleaned === '0h 00m') return '—'
+      return cleaned
     }
-  }
-
-  const formatMinutesToHours = (minutes: number) => {
-    if (minutes === 0) return '0'
-    const hours = Math.floor(minutes / 60)
-    const mins = minutes % 60
-    if (hours === 0) return `${mins}m`
-    if (mins === 0) return `${hours}h`
-    return `${hours}h ${mins}m`
+    if (val === 0) return '—'
+    const h = Math.floor(val / 60), m = val % 60
+    if (h === 0) return `${m}m`
+    if (m === 0) return `${h}h`
+    return `${h}h ${m}m`
   }
 
   return (
     <div className="w-full space-y-6 p-6">
-      {/* Filters */}
-      <Card className="p-6 space-y-4">
-        <h2 className="text-lg font-semibold">Filters</h2>
 
-        {/* Labels row */}
-        <div className="flex items-center gap-3 mb-1.5">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-48">Employee</span>
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-48">From Date</span>
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-48">To Date</span>
+      {/* ── Filters + Pagination ─────────────────────────────────────────────── */}
+      <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
+        <div className="flex flex-wrap gap-4 items-end justify-between">
+
+          {/* Left: filter controls */}
+          <div className="flex flex-wrap gap-4 items-end">
+
+            {/* Employee */}
+            <div className="space-y-1 flex-shrink-0">
+              <Label className="text-slate-700 font-semibold text-sm">Employee</Label>
+              <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+                <SelectTrigger className="h-9 w-44 text-sm bg-white border-slate-300">
+                  <SelectValue placeholder="All Employees" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Employees</SelectItem>
+                  {uniqueEmployeeNames.map(name => (
+                    <SelectItem key={name} value={name}>{name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Start Date */}
+            <div className="space-y-1 flex-shrink-0">
+              <Label className="text-slate-700 font-semibold text-sm">From Date</Label>
+              <Popover open={isStartCalendarOpen} onOpenChange={setIsStartCalendarOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
+                    <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
+                    <span className="text-slate-900 font-medium text-sm">{format(startDateObj, 'MMM dd, yyyy')}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <MultiViewCalendar
+                    selected={startDateObj}
+                    onSelect={(date) => { setStartDate(format(date, 'yyyy-MM-dd')); setIsStartCalendarOpen(false) }}
+                    fromYear={2020} toYear={2030}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {/* End Date */}
+            <div className="space-y-1 flex-shrink-0">
+              <Label className="text-slate-700 font-semibold text-sm">To Date</Label>
+              <Popover open={isEndCalendarOpen} onOpenChange={setIsEndCalendarOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
+                    <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
+                    <span className="text-slate-900 font-medium text-sm">{format(endDateObj, 'MMM dd, yyyy')}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <MultiViewCalendar
+                    selected={endDateObj}
+                    onSelect={(date) => { setEndDate(format(date, 'yyyy-MM-dd')); setIsEndCalendarOpen(false) }}
+                    fromYear={2020} toYear={2030}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+
+          {/* Right: total count + rows-per-page + 4-button page nav */}
+          <div className="flex items-end gap-4 flex-shrink-0">
+
+            {/* Total record count */}
+            {!isLoading && totalElements > 0 && (
+              <div className="space-y-1">
+                <Label className="text-slate-700 font-semibold text-sm">Total Records</Label>
+                <div className="h-9 flex items-center px-3 rounded-md border border-slate-300 bg-slate-50">
+                  <span className="text-sm font-bold text-slate-800">{totalElements.toLocaleString()}</span>
+                </div>
+              </div>
+            )}
+
+            {computedTotalPages > 0 && (
+              <>
+                {/* Rows per page */}
+                <div className="space-y-1">
+                  <Label className="text-slate-700 font-semibold text-sm">Rows per page</Label>
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(v) => { setPageSize(Number(v)); setPageNo(0) }}
+                  >
+                    <SelectTrigger className="h-9 w-24 text-sm bg-white border-slate-300">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAGE_SIZE_OPTIONS.map(s => (
+                        <SelectItem key={s} value={String(s)}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Page info + 4 navigation buttons */}
+                <div className="space-y-1">
+                  <Label className="text-slate-700 font-semibold text-sm">
+                    Page {pageNo + 1} of {computedTotalPages}
+                  </Label>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline" size="icon"
+                      className="h-9 w-9 border-slate-300 bg-white"
+                      onClick={() => setPageNo(0)}
+                      disabled={isFirstPage}
+                      title="First page"
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline" size="icon"
+                      className="h-9 w-9 border-slate-300 bg-white"
+                      onClick={() => setPageNo(p => Math.max(0, p - 1))}
+                      disabled={isFirstPage}
+                      title="Previous page"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline" size="icon"
+                      className="h-9 w-9 border-slate-300 bg-white"
+                      onClick={() => setPageNo(p => Math.min(computedTotalPages - 1, p + 1))}
+                      disabled={isLastPage}
+                      title="Next page"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline" size="icon"
+                      className="h-9 w-9 border-slate-300 bg-white"
+                      onClick={() => setPageNo(computedTotalPages - 1)}
+                      disabled={isLastPage}
+                      title="Last page"
+                    >
+                      <ChevronsRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
         </div>
+      </div>
 
-        {/* Inputs row */}
-        <div className="flex items-center gap-3">
-          {/* Employee Filter */}
-          <div className="w-48">
-            <Select value={filters.employeeName} onValueChange={(value) => setFilters(prev => ({ ...prev, employeeName: value }))}>
-              <SelectTrigger className="h-9 text-sm w-full">
-                <SelectValue placeholder="Select Employee" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Employees</SelectItem>
-                {uniqueEmployeeNames.map(name => (
-                  <SelectItem key={name} value={name}>
-                    {name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Start Date Filter */}
-          <div className="w-48">
-            <Popover open={isStartDateCalendarOpen} onOpenChange={setIsStartDateCalendarOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="h-9 text-sm w-full justify-start gap-2">
-                  <CalendarIcon className="w-4 h-4" />
-                  <span>{format(startDateObj, 'MMM dd, yyyy')}</span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <MultiViewCalendar
-                  selected={startDateObj}
-                  onSelect={handleStartDateSelect}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          {/* End Date Filter */}
-          <div className="w-48">
-            <Popover open={isEndDateCalendarOpen} onOpenChange={setIsEndDateCalendarOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="h-9 text-sm w-full justify-start gap-2">
-                  <CalendarIcon className="w-4 h-4" />
-                  <span>{format(endDateObj, 'MMM dd, yyyy')}</span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <MultiViewCalendar
-                  selected={endDateObj}
-                  onSelect={handleEndDateSelect}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
-      </Card>
-
-      {/* Error display */}
+      {/* ── Error ───────────────────────────────────────────────────────────── */}
       {error && (
-        <Card className="p-4 bg-red-50 border-red-200">
-          <p className="text-red-600">{error}</p>
+        <Card className="border-red-200 bg-red-50">
+          <div className="p-4 text-red-800">{error}</div>
         </Card>
       )}
 
-      {/* Table */}
-      <Card className="overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-gray-50">
-              <TableHead>Employee Name</TableHead>
-              <TableHead>Attendance Date</TableHead>
-              <TableHead>First In</TableHead>
-              <TableHead>Last Out</TableHead>
-              <TableHead className="text-right">Worked Minutes</TableHead>
-              <TableHead className="text-right">Break Minutes</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
-                  <div className="flex items-center justify-center gap-2">
-                    <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
-                    <span className="text-slate-500">Loading attendance summary...</span>
-                  </div>
-                </TableCell>
+      {/* ── Table ───────────────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-900">Attendance Summary</h2>
+          {!isLoading && totalElements > 0 && (
+            <span className="text-xs text-slate-500">
+              Showing {startItem}–{endItem} of {totalElements.toLocaleString()} records
+            </span>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-gray-50">
+                <TableHead>Employee Name</TableHead>
+                <TableHead>Attendance Date</TableHead>
+                <TableHead>First In</TableHead>
+                <TableHead>Last Out</TableHead>
+                <TableHead className="text-right">Worked</TableHead>
+                <TableHead className="text-right">Break</TableHead>
               </TableRow>
-            ) : filteredData.length > 0 ? (
-              filteredData.map((record, index) => (
-                <TableRow key={record.id || index} className="h-14">
-                  <TableCell className="font-medium py-4">{record.employeeName}</TableCell>
-                  <TableCell className="py-4">{record.attendanceDate ? format(parseISO(record.attendanceDate), 'MMM dd, yyyy') : 'N/A'}</TableCell>
-                  <TableCell className="py-4">{formatDateTime(record.firstIn)}</TableCell>
-                  <TableCell className="py-4">{formatDateTime(record.lastOut)}</TableCell>
-                  <TableCell className="text-right py-4 font-mono">{record.workedMinutes}</TableCell>
-                  <TableCell className="text-right py-4 font-mono">{record.breakMinutes}</TableCell>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-600" />
+                  </TableCell>
                 </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-slate-500">
-                  No attendance records found for the selected criteria
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Card>
+              ) : filteredData.length > 0 ? (
+                filteredData.map((record, index) => (
+                  <TableRow key={record.id || index} className="h-14">
+                    <TableCell className="font-medium py-4">{record.employeeName}</TableCell>
+                    <TableCell className="py-4">
+                      {record.attendanceDate ? format(parseISO(record.attendanceDate), 'MMM dd, yyyy') : 'N/A'}
+                    </TableCell>
+                    <TableCell className="py-4">{formatDateTime(record.firstIn)}</TableCell>
+                    <TableCell className="py-4">{formatDateTime(record.lastOut)}</TableCell>
+                    <TableCell className="text-right py-4 font-mono">{formatDuration(record.workedMinutes)}</TableCell>
+                    <TableCell className="text-right py-4 font-mono">{formatDuration(record.breakMinutes)}</TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8 text-slate-500">
+                    No attendance records found for the selected criteria
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
     </div>
   )
 }
