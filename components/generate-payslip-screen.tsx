@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useMemo, useEffect, useRef } from "react"
-import { Search, Filter, AlertCircle, CalendarIcon, Eye, X, CheckCircle2, XCircle, Loader2 } from "lucide-react"
+import { useState, useMemo, useEffect } from "react"
+import { Search, Filter, AlertCircle, CalendarIcon, Eye, X, CheckCircle2, XCircle, Loader2, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -34,8 +34,8 @@ interface ApiEmployee {
 // Per-employee generation status tracked during bulk generate
 type GenStatus = "idle" | "generating" | "done" | "failed"
 
-const BASE     = "http://3.109.152.136:8080/api/pdf"
-const SALARY   = "http://3.109.152.136:8080/api/payrolls"
+const BASE   = "http://3.109.152.136:8080/api/pdf"
+const SALARY = "http://3.109.152.136:8080/api/payrolls"
 
 export function GeneratePayslipScreen() {
   const [selectedEmployee, setSelectedEmployee]   = useState<string>("")
@@ -48,13 +48,16 @@ export function GeneratePayslipScreen() {
   const [isMonthlyCalendarOpen, setIsMonthlyCalendarOpen] = useState(false)
   const [apiEmployees, setApiEmployees]           = useState<ApiEmployee[]>([])
   const [isLoadingEmployees, setIsLoadingEmployees] = useState(false)
-
+// ── Preview error modal ────────────────────────────────────────────────────
+const [previewErrorModalOpen, setPreviewErrorModalOpen] = useState(false)
+const [previewErrorModalEmployee, setPreviewErrorModalEmployee] = useState<string>("")
   // ── Zero salary warning modal ──────────────────────────────────────────────
   const [showZeroSalaryWarning, setShowZeroSalaryWarning] = useState(false)
 
   // ── Bulk generate progress modal ──────────────────────────────────────────
   const [showGenerateModal, setShowGenerateModal] = useState(false)
   const [genStatusMap, setGenStatusMap]           = useState<Record<string, GenStatus>>({})
+  const [bulkGenError, setBulkGenError]           = useState<Record<string, string>>({})
   const [generateStarted, setGenerateStarted]     = useState(false)
 
   // ── Salary calculation status (shown inside the progress modal) ────────────
@@ -63,15 +66,23 @@ export function GeneratePayslipScreen() {
   const [calcError, setCalcError] = useState<string | null>(null)
 
   // ── Preview state ──────────────────────────────────────────────────────────
-  const [previewOpen, setPreviewOpen]             = useState(false)
-  const [previewName, setPreviewName]             = useState<string>("")
-  const [isLoadingPreview, setIsLoadingPreview]   = useState(false)
-  const [previewError, setPreviewError]           = useState(false)
-  const [pdfPages, setPdfPages]                   = useState<string[]>([])
-  const [currentPage, setCurrentPage]             = useState(1)
+  const [previewOpen, setPreviewOpen]           = useState(false)
+  const [previewName, setPreviewName]           = useState<string>("")
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false)
+  const [previewError, setPreviewError]         = useState(false)
+  const [pdfPages, setPdfPages]                 = useState<string[]>([])
+  const [currentPage, setCurrentPage]           = useState(1)
 
   // ── Per-employee generate tracking ────────────────────────────────────────
   const [singleGenStatus, setSingleGenStatus] = useState<Record<string, GenStatus>>({})
+  const [singleGenError, setSingleGenError]   = useState<Record<string, string>>({})
+
+  // ── Error modal (no-salary) ────────────────────────────────────────────────
+  const [errorModalOpen, setErrorModalOpen]     = useState(false)
+  const [errorModalEmployee, setErrorModalEmployee] = useState<string>("")
+
+  const NO_SALARY_MESSAGE =
+    "No salary found for the selected period and employee. Please go to the Salary tab, generate the salary, and then download the payslip."
 
   // ── Auth header ────────────────────────────────────────────────────────────
   const getAuthHeaders = (): HeadersInit => {
@@ -103,12 +114,8 @@ export function GeneratePayslipScreen() {
 
   // ── Build salary calculation URL based on type ─────────────────────────────
   const buildCalcUrl = (): string => {
-    if (selectedType === "daily") {
-      return `${SALARY}/calculate-daily-salary?date=${getDateParam()}`
-    }
-    if (selectedType === "weekly") {
-      return `${SALARY}/GenerateWeeklySalary?anyDateInWeek=${getDateParam()}`
-    }
+    if (selectedType === "daily")  return `${SALARY}/calculate-daily-salary?date=${getDateParam()}`
+    if (selectedType === "weekly") return `${SALARY}/GenerateWeeklySalary?anyDateInWeek=${getDateParam()}`
     return `${SALARY}/generateMonthlyPayroll?month=${getDateParam()}`
   }
 
@@ -156,8 +163,8 @@ export function GeneratePayslipScreen() {
     [selectedDate])
 
   const dateBtnLabel = useMemo(() => {
-    if (selectedType === "daily")   return formatDateShort(selectedDate)
-    if (selectedType === "weekly")  return weekRangeDisplay
+    if (selectedType === "daily")  return formatDateShort(selectedDate)
+    if (selectedType === "weekly") return weekRangeDisplay
     return `${MONTHS[selectedDate.getMonth()]} ${selectedDate.getFullYear()}`
   }, [selectedType, selectedDate, weekRangeDisplay])
 
@@ -193,7 +200,6 @@ export function GeneratePayslipScreen() {
     setCalcError(null)
     try {
       const url = buildCalcUrl()
-      console.log("[payslip] calculating salary →", url)
       const res = await fetch(url, {
         method: "POST",
         headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
@@ -217,6 +223,18 @@ export function GeneratePayslipScreen() {
     }
   }
 
+  // ── Helper: download blob as PDF ───────────────────────────────────────────
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const objectUrl = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = objectUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(objectUrl)
+  }
+
   // ── Bulk PDF generation (sequential) ──────────────────────────────────────
   const runBulkGenerate = async (names: string[]) => {
     for (const name of names) {
@@ -229,14 +247,7 @@ export function GeneratePayslipScreen() {
         if (!res.ok) throw new Error(`Generate failed (${res.status})`)
 
         const blob = await res.blob()
-        const objectUrl = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = objectUrl
-        a.download = `${name}_${selectedType}_${getDateParam()}.pdf`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(objectUrl)
+        downloadBlob(blob, `${name}_${selectedType}_${getDateParam()}.pdf`)
 
         setApiEmployees(prev =>
           prev.map(e => e.employeeName === name ? { ...e, paySlipGenerated: true } : e))
@@ -244,6 +255,7 @@ export function GeneratePayslipScreen() {
       } catch (err) {
         console.error("[payslip] generate error:", err)
         setGenStatusMap(prev => ({ ...prev, [name]: "failed" }))
+        setBulkGenError(prev => ({ ...prev, [name]: NO_SALARY_MESSAGE }))
       }
     }
   }
@@ -270,6 +282,7 @@ export function GeneratePayslipScreen() {
     const initialStatus: Record<string, GenStatus> = {}
     allEmployeeNames.forEach(n => { initialStatus[n] = "idle" })
     setGenStatusMap(initialStatus)
+    setBulkGenError({})
     setCalcPhase(withCalc ? "calculating" : "idle")
     setCalcError(null)
     setGenerateStarted(true)
@@ -297,39 +310,43 @@ export function GeneratePayslipScreen() {
     openGenerateModal(false)
   }
 
-  // ── Per-row single generate (with 5s reset back to idle after done) ────────
+  // ── Per-row single generate ────────────────────────────────────────────────
   const handleGenerateOne = async (employeeName: string) => {
+    // Clear any previous error for this employee
+    setSingleGenError(prev => { const next = { ...prev }; delete next[employeeName]; return next })
     setSingleGenStatus(prev => ({ ...prev, [employeeName]: "generating" }))
+
     try {
       const res = await fetch(buildGenerateUrl(employeeName), {
         method: "GET",
         headers: getAuthHeaders(),
       })
       if (!res.ok) throw new Error(`Generate failed (${res.status})`)
+
       const blob = await res.blob()
-      const objectUrl = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = objectUrl
-      a.download = `${employeeName}_${selectedType}_${getDateParam()}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(objectUrl)
+      downloadBlob(blob, `${employeeName}_${selectedType}_${getDateParam()}.pdf`)
+
       setApiEmployees(prev =>
         prev.map(e => e.employeeName === employeeName ? { ...e, paySlipGenerated: true } : e))
       setSingleGenStatus(prev => ({ ...prev, [employeeName]: "done" }))
-      // ✅ Reset back to Generate button after 5 seconds
+
+      // Reset back to Generate button after 5 seconds
       setTimeout(() => {
         setSingleGenStatus(prev => ({ ...prev, [employeeName]: "idle" }))
       }, 5000)
     } catch (err) {
       console.error("[payslip] single generate error:", err)
       setSingleGenStatus(prev => ({ ...prev, [employeeName]: "failed" }))
+      setSingleGenError(prev => ({ ...prev, [employeeName]: NO_SALARY_MESSAGE }))
+      // Open the error modal window
+      setErrorModalEmployee(employeeName)
+      setErrorModalOpen(true)
     }
   }
 
   // ── Retry single failed employee (bulk modal) ──────────────────────────────
   const handleRetry = async (name: string) => {
+    setBulkGenError(prev => { const next = { ...prev }; delete next[name]; return next })
     setGenStatusMap(prev => ({ ...prev, [name]: "generating" }))
     try {
       const res = await fetch(buildGenerateUrl(name), {
@@ -337,20 +354,16 @@ export function GeneratePayslipScreen() {
         headers: getAuthHeaders(),
       })
       if (!res.ok) throw new Error(`Generate failed (${res.status})`)
+
       const blob = await res.blob()
-      const objectUrl = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = objectUrl
-      a.download = `${name}_${selectedType}_${getDateParam()}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(objectUrl)
+      downloadBlob(blob, `${name}_${selectedType}_${getDateParam()}.pdf`)
+
       setApiEmployees(prev =>
         prev.map(e => e.employeeName === name ? { ...e, paySlipGenerated: true } : e))
       setGenStatusMap(prev => ({ ...prev, [name]: "done" }))
     } catch {
       setGenStatusMap(prev => ({ ...prev, [name]: "failed" }))
+      setBulkGenError(prev => ({ ...prev, [name]: NO_SALARY_MESSAGE }))
     }
   }
 
@@ -415,12 +428,15 @@ export function GeneratePayslipScreen() {
       }
 
       setPdfPages(pages)
-    } catch (err) {
-      console.error("[payslip] preview error:", err)
-      setPreviewError(true)
-    } finally {
-      setIsLoadingPreview(false)
-    }
+   } catch (err) {
+  console.error("[payslip] preview error:", err)
+  setPreviewOpen(false)          // close the PDF viewer
+  setPdfPages([])
+  setPreviewErrorModalEmployee(employeeName)
+  setPreviewErrorModalOpen(true) // open the dedicated error modal
+} finally {
+  setIsLoadingPreview(false)
+}
   }
 
   // ── Calc phase label helpers ───────────────────────────────────────────────
@@ -641,9 +657,12 @@ export function GeneratePayslipScreen() {
                             if (st === "failed") {
                               return (
                                 <Button size="sm"
-                                  onClick={() => handleGenerateOne(p.employeeName)}
+                                  onClick={() => {
+                                    setErrorModalEmployee(p.employeeName)
+                                    setErrorModalOpen(true)
+                                  }}
                                   className="h-8 rounded-lg text-xs px-3 gap-1.5 bg-red-600 hover:bg-red-700 text-white">
-                                  Retry
+                                  <AlertTriangle className="h-3 w-3" /> Failed
                                 </Button>
                               )
                             }
@@ -705,6 +724,18 @@ export function GeneratePayslipScreen() {
                           </Button>
                         )
                       }
+                      if (st === "failed") {
+                        return (
+                          <Button size="sm"
+                            onClick={() => {
+                              setErrorModalEmployee(p.employeeName)
+                              setErrorModalOpen(true)
+                            }}
+                            className="h-8 rounded-lg text-xs px-2.5 gap-1 bg-red-600 hover:bg-red-700 text-white shrink-0">
+                            <AlertTriangle className="h-3 w-3" />
+                          </Button>
+                        )
+                      }
                       return (
                         <Button size="sm"
                           onClick={() => handleGenerateOne(p.employeeName)}
@@ -742,6 +773,88 @@ export function GeneratePayslipScreen() {
           )}
         </CardContent>
       </Card>
+
+      {/* ════════════════════════════════════════════════════════════════════
+          NO SALARY ERROR MODAL
+          Shown when a single-employee generate fails due to missing salary.
+      ════════════════════════════════════════════════════════════════════ */}
+      <Dialog open={errorModalOpen} onOpenChange={setErrorModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2.5">
+              {/* Amber warning icon in a soft circle */}
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+                <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              </span>
+              Salary Not Found
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Employee context */}
+          {errorModalEmployee && (
+            <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-muted/60 border border-border">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-semibold select-none">
+                {errorModalEmployee.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{errorModalEmployee}</p>
+                <p className="text-xs text-muted-foreground capitalize">
+                  {selectedType} · {dateBtnLabel}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Main message */}
+          <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-4 py-3">
+            <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-800 dark:text-amber-300 leading-relaxed">
+              {singleGenError[errorModalEmployee] ?? NO_SALARY_MESSAGE}
+            </p>
+          </div>
+
+          {/* Step guide */}
+          <ol className="space-y-2 text-sm text-muted-foreground pl-1">
+            {[
+              "Go to the Salary tab in the sidebar",
+              `Select the ${selectedType} salary type and the same period`,
+              "Click to calculate",
+              "Return here and click Generate again",
+            ].map((step, idx) => (
+              <li key={idx} className="flex items-start gap-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted border border-border text-[11px] font-semibold text-foreground mt-0.5">
+                  {idx + 1}
+                </span>
+                <span className="leading-relaxed">{step}</span>
+              </li>
+            ))}
+          </ol>
+
+          <DialogFooter className="gap-2 sm:gap-2 pt-1">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setErrorModalOpen(false)
+                // Reset the failed status so the Generate button reappears
+                setSingleGenStatus(prev => {
+                  const next = { ...prev }
+                  delete next[errorModalEmployee]
+                  return next
+                })
+                setSingleGenError(prev => {
+                  const next = { ...prev }
+                  delete next[errorModalEmployee]
+                  return next
+                })
+              }}
+                className="rounded-lg h-10 flex-1 bg-blue-600 hover:bg-blue-700"
+            >
+              Dismiss
+            </Button>
+            
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── PDF PREVIEW MODAL ─────────────────────────────────────────────── */}
       <Dialog open={previewOpen} onOpenChange={(open) => { setPreviewOpen(open); if (!open) setPdfPages([]) }}>
@@ -804,7 +917,70 @@ export function GeneratePayslipScreen() {
           )}
         </DialogContent>
       </Dialog>
+{/* ════════════════════════════════════════════════════════════════════
+    PREVIEW — NO SALARY ERROR MODAL
+════════════════════════════════════════════════════════════════════ */}
+<Dialog open={previewErrorModalOpen} onOpenChange={setPreviewErrorModalOpen}>
+  <DialogContent className="sm:max-w-md">
+    <DialogHeader>
+      <DialogTitle className="flex items-center gap-2.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+          <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+        </span>
+        Salary Not Found
+      </DialogTitle>
+    </DialogHeader>
 
+    {/* Employee context */}
+    {previewErrorModalEmployee && (
+      <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-muted/60 border border-border">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-semibold select-none">
+          {previewErrorModalEmployee.charAt(0).toUpperCase()}
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-foreground truncate">{previewErrorModalEmployee}</p>
+          <p className="text-xs text-muted-foreground capitalize">
+            {selectedType} · {dateBtnLabel}
+          </p>
+        </div>
+      </div>
+    )}
+
+    {/* Main message */}
+    <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-4 py-3">
+      <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+      <p className="text-sm text-amber-800 dark:text-amber-300 leading-relaxed">
+        {NO_SALARY_MESSAGE}
+      </p>
+    </div>
+
+    {/* Step guide */}
+    <ol className="space-y-2 text-sm text-muted-foreground pl-1">
+      {[
+        "Go to the Salary tab in the sidebar",
+        `Select the ${selectedType} salary type and the same period`,
+        "Click to calculate",
+        "Return here and click Preview again",
+      ].map((step, idx) => (
+        <li key={idx} className="flex items-start gap-2.5">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted border border-border text-[11px] font-semibold text-foreground mt-0.5">
+            {idx + 1}
+          </span>
+          <span className="leading-relaxed">{step}</span>
+        </li>
+      ))}
+    </ol>
+
+    <DialogFooter className="gap-2 sm:gap-2 pt-1">
+      <Button
+        onClick={() => setPreviewErrorModalOpen(false)}
+        className="rounded-lg h-10 flex-1 bg-blue-600 hover:bg-blue-700"
+      >
+        Dismiss
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
       {/* ── ZERO SALARY WARNING ───────────────────────────────────────────── */}
       <Dialog open={showZeroSalaryWarning} onOpenChange={setShowZeroSalaryWarning}>
         <DialogContent className="sm:max-w-sm">
@@ -926,10 +1102,11 @@ export function GeneratePayslipScreen() {
               {allEmployeeNames.map((name, idx) => {
                 const status = genStatusMap[name] ?? "idle"
                 const isWaiting = calcPhase === "calculating"
+                const errMsg = bulkGenError[name]
                 return (
                   <div
                     key={`${name}-${idx}`}
-                    className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                    className={`rounded-lg border transition-colors ${
                       isWaiting
                         ? "border-border bg-muted/30 opacity-50"
                         : status === "done"
@@ -941,53 +1118,77 @@ export function GeneratePayslipScreen() {
                               : "border-border bg-muted/30"
                     }`}
                   >
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      {isWaiting
-                        ? <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/20 shrink-0" />
-                        : status === "done"
-                          ? <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-                          : status === "failed"
-                            ? <XCircle className="h-4 w-4 text-red-500 shrink-0" />
-                            : status === "generating"
-                              ? <Loader2 className="h-4 w-4 text-blue-600 shrink-0 animate-spin" />
-                              : <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30 shrink-0" />
-                      }
-                      <span className={`text-sm font-medium truncate ${
-                        isWaiting
-                          ? "text-muted-foreground"
+                    {/* ── Top row: icon + name + badge ── */}
+                    <div className="flex items-center justify-between p-3">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        {isWaiting
+                          ? <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/20 shrink-0" />
                           : status === "done"
-                            ? "text-green-700 dark:text-green-400"
+                            ? <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
                             : status === "failed"
-                              ? "text-red-600 dark:text-red-400"
+                              ? <XCircle className="h-4 w-4 text-red-500 shrink-0" />
                               : status === "generating"
-                                ? "text-blue-700 dark:text-blue-400"
-                                : "text-foreground"
-                      }`}>
-                        {name}
-                      </span>
+                                ? <Loader2 className="h-4 w-4 text-blue-600 shrink-0 animate-spin" />
+                                : <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30 shrink-0" />
+                        }
+                        <span className={`text-sm font-medium truncate ${
+                          isWaiting
+                            ? "text-muted-foreground"
+                            : status === "done"
+                              ? "text-green-700 dark:text-green-400"
+                              : status === "failed"
+                                ? "text-red-600 dark:text-red-400"
+                                : status === "generating"
+                                  ? "text-blue-700 dark:text-blue-400"
+                                  : "text-foreground"
+                        }`}>
+                          {name}
+                        </span>
+                      </div>
+
+                      <div className="ml-3 shrink-0">
+                        {isWaiting && <span className="text-xs text-muted-foreground">Pending calc</span>}
+                        {!isWaiting && status === "done" && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-medium">Downloaded</span>
+                        )}
+                        {!isWaiting && status === "generating" && (
+                          <span className="text-xs text-blue-600 font-medium">Generating…</span>
+                        )}
+                        {!isWaiting && status === "idle" && (
+                          <span className="text-xs text-muted-foreground">Waiting</span>
+                        )}
+                        {!isWaiting && status === "failed" && !errMsg && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleRetry(name)}
+                            className="h-7 text-xs rounded-lg bg-red-600 hover:bg-red-700 px-3"
+                          >
+                            Retry
+                          </Button>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="ml-3 shrink-0">
-                      {isWaiting && <span className="text-xs text-muted-foreground">Pending calc</span>}
-                      {!isWaiting && status === "done" && (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-medium">Downloaded</span>
-                      )}
-                      {!isWaiting && status === "generating" && (
-                        <span className="text-xs text-blue-600 font-medium">Generating…</span>
-                      )}
-                      {!isWaiting && status === "idle" && (
-                        <span className="text-xs text-muted-foreground">Waiting</span>
-                      )}
-                      {!isWaiting && status === "failed" && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleRetry(name)}
-                          className="h-7 text-xs rounded-lg bg-red-600 hover:bg-red-700 px-3"
-                        >
-                          Retry
-                        </Button>
-                      )}
-                    </div>
+                    {/* ── Error message row (no-salary) ── */}
+                    {!isWaiting && status === "failed" && errMsg && (
+                      <div className="px-3 pb-3 flex flex-col gap-2">
+                        <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 px-3 py-2">
+                          <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                          <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                            {errMsg}
+                          </p>
+                        </div>
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            onClick={() => handleRetry(name)}
+                            className="h-7 text-xs rounded-lg bg-red-600 hover:bg-red-700 px-3"
+                          >
+                            Retry
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}

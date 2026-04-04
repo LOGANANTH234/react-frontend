@@ -6,8 +6,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useEffect } from "react"
 
 // Pages that never require authentication
-const PUBLIC_PATHS = ["/", "/login"]
-
+const PUBLIC_PATHS = ["/", "/login", "/pricing"]
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { auth, isLoading } = useAuth()
   const pathname = usePathname()
