@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { AlertCircle, CalendarIcon, Zap, AlertTriangle, Clock } from "lucide-react"
+import { AlertCircle, CalendarIcon, Zap, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useHasAction, MODULES, ACTIONS } from "@/lib/permission-utils"
 import { SearchableComboBox } from "./searchable-combo-box"
@@ -29,7 +29,7 @@ interface ApiResponse {
   regularSalaryTotal: number
   overtimeSalaryTotal: number
   allowanceTotal: number
-  penaltyMins: string         // "1h:0m"  ← backend field is penaltyMins (camelCase)
+  penaltyMins: string         // "1h:0m"
   penaltyAmount: number
   warningTotal: number
   netPay: number
@@ -37,7 +37,7 @@ interface ApiResponse {
 }
 
 interface MonthlyPayrollRecord extends ApiResponse {
-  _idx: number               // used as React key when no unique id
+  _idx: number
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -65,12 +65,16 @@ function attendanceColor(present: number, working: number): string {
   return "text-red-600 font-semibold"
 }
 
-function formatGeneratedAt(ts: string | null): string {
-  if (!ts) return "—"
-  try {
-    return new Date(ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-  } catch { return ts }
+/** Return a new Date shifted by `months` calendar months */
+function shiftMonth(date: Date, months: number): Date {
+  const d = new Date(date)
+  d.setMonth(d.getMonth() + months)
+  return d
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function MonthlyPayrollScreen() {
   const { auth } = useAuth()
@@ -105,6 +109,11 @@ export function MonthlyPayrollScreen() {
   }
 
   useEffect(() => { if (auth?.token) fetchData(selectedDate) }, [selectedDate, auth?.token])
+
+  // ── navigation ────────────────────────────────────────────────────────────
+
+  const handlePrevMonth = () => setSelectedDate(prev => shiftMonth(prev, -1))
+  const handleNextMonth = () => setSelectedDate(prev => shiftMonth(prev, 1))
 
   // ── generate ──────────────────────────────────────────────────────────────
 
@@ -188,6 +197,8 @@ export function MonthlyPayrollScreen() {
 
   const monthLabel = selectedDate.toLocaleDateString("en-US", { year: "numeric", month: "long" })
 
+  // ── render ────────────────────────────────────────────────────────────────
+
   return (
     <div className="w-full space-y-6 px-6 py-8">
 
@@ -199,26 +210,49 @@ export function MonthlyPayrollScreen() {
             <SearchableComboBox options={employeeOptions} value={selectedEmployee} onValueChange={setSelectedEmployee}
               placeholder="Select employee..." searchPlaceholder="Search employees..." />
           </div>
+
+          {/* ── Month picker with prev / next navigation ── */}
           <div className="space-y-1 flex-shrink-0">
             <Label className="text-slate-700 font-semibold text-sm">Select Month</Label>
-            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 text-slate-900 text-sm">
-                  <CalendarIcon className="mr-1 h-3 w-3 text-slate-600" />
-                  <span className="font-medium text-sm">{monthLabel}</span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <MonthYearCalendar selected={selectedDate} onSelect={d => { setSelectedDate(d); setIsCalendarOpen(false) }}
-                  fromYear={2020} toYear={2030} />
-              </PopoverContent>
-            </Popover>
+            <div className="flex items-center gap-1">
+              {/* Previous month */}
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 border-slate-300 bg-white hover:bg-slate-50 text-slate-500 flex-shrink-0"
+                onClick={handlePrevMonth}
+                title="Previous month"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+
+              {/* Calendar popover */}
+              <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 text-slate-900 text-sm">
+                    <CalendarIcon className="mr-1 h-3 w-3 text-slate-600" />
+                    <span className="font-medium text-sm">{monthLabel}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <MonthYearCalendar selected={selectedDate} onSelect={d => { setSelectedDate(d); setIsCalendarOpen(false) }}
+                    fromYear={2020} toYear={2030} />
+                </PopoverContent>
+              </Popover>
+
+              {/* Next month */}
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 border-slate-300 bg-white hover:bg-slate-50 text-slate-500 flex-shrink-0"
+                onClick={handleNextMonth}
+                title="Next month"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-								   
-																													 
-															  
-					 
-				
+
           {hasGenerateSalary && (
             <div className="ml-auto">
               <Button onClick={handleOpenGenerate} className="bg-blue-600 hover:bg-blue-700 text-white">
@@ -236,10 +270,6 @@ export function MonthlyPayrollScreen() {
         </div>
       )}
 
-      {/* ── Summary cards ───────────────────────────────────────────────── */}
-
-      
-
       {/* ── Table ───────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -253,25 +283,19 @@ export function MonthlyPayrollScreen() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  {/* Identity */}
                   <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Employee</th>
-                  {/* Attendance group */}
                   <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Work Days</th>
                   <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Present</th>
                   <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Absent</th>
                   <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Att. %</th>
-                  {/* Earnings group */}
                   <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Regular</th>
                   <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Overtime</th>
                   <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Allowance</th>
                   <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Gross Pay</th>
-                  {/* Deductions group */}
                   <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Warnings</th>
                   <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Penalty Mins</th>
                   <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Penalty (₹)</th>
-                  {/* Net */}
                   <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 whitespace-nowrap">Net Salary</th>
-																															
                 </tr>
               </thead>
               <tbody>
@@ -279,12 +303,10 @@ export function MonthlyPayrollScreen() {
                   const gross = (r.regularSalaryTotal || 0) + (r.overtimeSalaryTotal || 0) + (r.allowanceTotal || 0)
                   return (
                     <tr key={r._idx} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
-                      {/* Employee + month */}
                       <td className="px-5 py-3.5 whitespace-nowrap border-r border-gray-300">
                         <div className="font-medium text-gray-800">{r.employeeName}</div>
                         <div className="text-xs text-gray-400 mt-0.5">{r.payrollMonth}</div>
                       </td>
-                      {/* Attendance */}
                       <td className="px-5 py-3.5 text-center text-gray-700 whitespace-nowrap border-r border-gray-300">{r.workingDays}</td>
                       <td className="px-5 py-3.5 text-center text-gray-700 whitespace-nowrap border-r border-gray-300">{r.presentDays}</td>
                       <td className="px-5 py-3.5 text-center whitespace-nowrap border-r border-gray-300">
@@ -292,11 +314,9 @@ export function MonthlyPayrollScreen() {
                           ? <span className="text-gray-700">{r.absentDays}</span>
                           : <span className="text-gray-300">—</span>}
                       </td>
-                      {/* Attendance % */}
                       <td className={`px-5 py-3.5 text-center whitespace-nowrap border-r border-gray-300 ${attendanceColor(r.presentDays, r.workingDays)}`}>
                         {attendancePct(r.presentDays, r.workingDays)}
                       </td>
-                      {/* Earnings */}
                       <td className="px-5 py-3.5 text-right font-mono text-gray-700 whitespace-nowrap border-r border-gray-300">{fmt(r.regularSalaryTotal)}</td>
                       <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
                         {(r.overtimeSalaryTotal || 0) > 0
@@ -308,9 +328,7 @@ export function MonthlyPayrollScreen() {
                           ? <span className="text-gray-700">{fmt(r.allowanceTotal)}</span>
                           : <span className="text-gray-300">—</span>}
                       </td>
-                      {/* Gross */}
                       <td className="px-5 py-3.5 text-right font-mono font-semibold text-gray-800 whitespace-nowrap border-r border-gray-300">{fmt(gross)}</td>
-                      {/* Deductions */}
                       <td className="px-5 py-3.5 text-center border-r border-gray-300">
                         {r.warningTotal > 0
                           ? <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-xs">{r.warningTotal}</Badge>
@@ -326,17 +344,13 @@ export function MonthlyPayrollScreen() {
                           ? <span className="text-red-500 font-medium">{fmt(r.penaltyAmount)}</span>
                           : <span className="text-gray-300">—</span>}
                       </td>
-                      {/* Net */}
                       <td className="px-5 py-3.5 text-right font-mono font-semibold text-blue-600 whitespace-nowrap">{fmt(r.netPay)}</td>
-										  
-																														   
                     </tr>
                   )
                 }) : (
                   <tr><td colSpan={13} className="text-center py-12 text-slate-400">No payroll records found for the selected month and employee.</td></tr>
                 )}
               </tbody>
-              {/* Footer totals */}
               {filteredData.length > 1 && (
                 <tfoot>
                   <tr className="border-t border-gray-200 bg-gray-50 font-semibold text-sm">
@@ -358,7 +372,6 @@ export function MonthlyPayrollScreen() {
                     <td className="px-5 py-3 border-r border-gray-300" />
                     <td className="px-5 py-3 text-right font-mono text-red-500 font-medium border-r border-gray-300">{fmt(totals.penalty)}</td>
                     <td className="px-5 py-3 text-right font-mono font-bold text-blue-600">{fmt(totals.net)}</td>
-												
                   </tr>
                 </tfoot>
               )}

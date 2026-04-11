@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { AlertCircle, CalendarIcon, Zap } from "lucide-react"
+import { AlertCircle, CalendarIcon, Zap, ChevronLeft, ChevronRight } from "lucide-react"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useHasAction, MODULES, ACTIONS } from "@/lib/permission-utils"
 import { SearchableComboBox } from "./searchable-combo-box"
@@ -62,6 +62,13 @@ function parseHrStr(s: string | null | undefined): number {
   return parseInt(m[1]) * 60 + parseInt(m[2] || "0")
 }
 
+/** Return a new Date shifted by `days` days */
+function shiftDay(date: Date, days: number): Date {
+  const d = new Date(date)
+  d.setDate(d.getDate() + days)
+  return d
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,6 +108,11 @@ export function DailySalaryScreen() {
   }
 
   useEffect(() => { if (auth?.token) fetchData(selectedDate) }, [selectedDate, auth?.token])
+
+  // ── Navigation ─────────────────────────────────────────────────────────────
+
+  const handlePrevDay = () => setSelectedDate(prev => shiftDay(prev, -1))
+  const handleNextDay = () => setSelectedDate(prev => shiftDay(prev, 1))
 
   // ── Generate ───────────────────────────────────────────────────────────────
 
@@ -178,29 +190,55 @@ export function DailySalaryScreen() {
             />
           </div>
 
+          {/* ── Date picker with prev / next navigation ── */}
           <div className="space-y-1 flex-shrink-0">
             <Label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
               Date
             </Label>
-            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="h-9 px-3 gap-2 text-sm font-normal bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
-                >
-                  <CalendarIcon className="h-3.5 w-3.5 text-gray-400" />
-                  {dateLabel}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <MultiViewCalendar
-                  selected={selectedDate}
-                  onSelect={d => { setSelectedDate(d); setIsCalendarOpen(false) }}
-                  fromYear={2020}
-                  toYear={2030}
-                />
-              </PopoverContent>
-            </Popover>
+            <div className="flex items-center gap-1">
+              {/* Previous day */}
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 border-gray-300 bg-white hover:bg-gray-50 text-gray-500 flex-shrink-0"
+                onClick={handlePrevDay}
+                title="Previous day"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+
+              {/* Calendar popover */}
+              <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="h-9 px-3 gap-2 text-sm font-normal bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+                  >
+                    <CalendarIcon className="h-3.5 w-3.5 text-gray-400" />
+                    {dateLabel}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <MultiViewCalendar
+                    selected={selectedDate}
+                    onSelect={d => { setSelectedDate(d); setIsCalendarOpen(false) }}
+                    fromYear={2020}
+                    toYear={2030}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              {/* Next day */}
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 border-gray-300 bg-white hover:bg-gray-50 text-gray-500 flex-shrink-0"
+                onClick={handleNextDay}
+                title="Next day"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
           {hasGenerateSalary && (
@@ -245,7 +283,7 @@ export function DailySalaryScreen() {
           ) : (
             <table className="w-full text-sm">
 
-              {/* ── Single header row — plain, matches screenshot style ── */}
+              {/* ── Single header row ── */}
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
                   <th className="px-5 py-3 text-left   text-xs font-semibold text-gray-500 whitespace-nowrap border-r border-gray-300">Employee Name</th>
@@ -279,7 +317,6 @@ export function DailySalaryScreen() {
                                      + (r.extraAllowance || 0)
                                      + penaltyAmt
 
-                    // Colour-code Paid Hours vs Required Hours
                     const paidMins = r.salaryMinutes || 0
                     const reqMins  = parseHrStr(r.payableMinutes)
                     const isFull    = reqMins > 0 && paidMins >= reqMins
@@ -290,24 +327,17 @@ export function DailySalaryScreen() {
                         key={r.id}
                         className="border-b border-gray-200 hover:bg-gray-50 transition-colors"
                       >
-                        {/* Employee Name */}
                         <td className="px-5 py-3.5 font-medium text-gray-800 whitespace-nowrap border-r border-gray-300">
                           {r.employeeName}
                         </td>
-
-                        {/* Work Date */}
                         <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap border-r border-gray-300">
                           {r.workDate}
                         </td>
-
-                        {/* Req. Hours — neutral, fixed reference */}
                         <td className="px-5 py-3.5 text-center whitespace-nowrap border-r border-gray-300">
                           <span className="font-mono text-xs text-gray-500">
                             {r.payableMinutes || "—"}
                           </span>
                         </td>
-
-                        {/* Paid Hours — colour: green full, amber short, red absent */}
                         <td className="px-5 py-3.5 text-center whitespace-nowrap border-r border-gray-300">
                           <span className={
                             "font-mono text-xs font-semibold px-2 py-0.5 rounded " +
@@ -320,57 +350,40 @@ export function DailySalaryScreen() {
                             {r.workDuration || "—"}
                           </span>
                         </td>
-
-                        {/* Regular Salary */}
                         <td className="px-5 py-3.5 text-right font-mono text-gray-700 whitespace-nowrap border-r border-gray-300">
                           {fmt(r.regularSalary)}
                         </td>
-
-                        {/* Overtime */}
                         <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
                           {(r.OvertimeSalary || 0) > 0
                             ? <span className="text-gray-700">{fmt(r.OvertimeSalary)}</span>
                             : <span className="text-gray-300">—</span>}
                         </td>
-
-                        {/* Allowance */}
                         <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
                           {(r.extraAllowance || 0) > 0
                             ? <span className="text-gray-700">{fmt(r.extraAllowance)}</span>
                             : <span className="text-gray-300">—</span>}
                         </td>
-
-                        {/* Gross Pay — slightly emphasised */}
                         <td className="px-5 py-3.5 text-right font-mono font-semibold text-gray-800 whitespace-nowrap border-r border-gray-300">
                           {fmt(gross)}
                         </td>
-
-                        {/* Warnings */}
                         <td className="px-5 py-3.5 text-center border-r border-gray-300">
                           {r.warningCount > 0
                             ? <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-xs">{r.warningCount}</Badge>
                             : <span className="text-slate-300 text-xs">—</span>}
                         </td>
-
-                        {/* Penalty Mins — red text when present */}
                         <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
                           {hasPenalty(r.penaltyMinutes)
                             ? <span className="text-red-500 font-medium">{r.penaltyMinutes}</span>
                             : <span className="text-gray-300">—</span>}
                         </td>
-
-                        {/* Penalty Amt — red text when present */}
                         <td className="px-5 py-3.5 text-right font-mono whitespace-nowrap border-r border-gray-300">
                           {penaltyAmt > 0
                             ? <span className="text-red-500 font-medium">{fmt(penaltyAmt)}</span>
                             : <span className="text-gray-300">—</span>}
                         </td>
-
-                        {/* Net Salary — blue, bold */}
                         <td className="px-5 py-3.5 text-right font-mono font-semibold text-blue-600 whitespace-nowrap">
                           {fmt(r.totalPay)}
                         </td>
-
                       </tr>
                     )
                   })

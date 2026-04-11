@@ -3,9 +3,9 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import {
   Users, Clock, Shield, FileText, BarChart3,
-  AlertTriangle, PenLine, Lock, ChevronDown, ChevronUp,
+  AlertTriangle, PenLine, Lock,
   ArrowRight, CheckCircle2, Zap, Cpu, X, Phone, Mail,
-  Building2, Send, Sparkles, TrendingUp, Info, Star,
+  Building2, Send, Info, Star, TrendingUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -93,59 +93,34 @@ const MODULES: Module[] = [
   },
 ]
 
-// ── Preset bundles ─────────────────────────────────────────
-interface Bundle {
-  id: string
-  name: string
-  tagline: string
-  modules: string[]   // optional module ids included
-  badge?: string
-  badgeColor?: string
+// ── Tiered pricing for mandatory modules ──────────────────
+// Each tier defines the per-employee price per mandatory module
+// and the employee count range it applies to.
+interface PriceTier {
+  label: string       // e.g. "1–10 employees"
+  min: number
+  max: number         // Infinity for the last tier
+  pricePerModule: number  // same for all 4 mandatory modules
+  coreTotal: number       // pricePerModule × 4
 }
 
-const BUNDLES: Bundle[] = [
-  {
-    id: 'starter',
-    name: 'Starter',
-    tagline: 'Core operations, nothing extra',
-    modules: [],
-    badge: 'Most affordable',
-    badgeColor: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-  },
-  {
-    id: 'growth',
-    name: 'Growth',
-    tagline: 'Full visibility for growing teams',
-    modules: ['live-attendance', 'payslip', 'warning'],
-    badge: 'Most popular',
-    badgeColor: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-  },
-  {
-    id: 'enterprise',
-    name: 'Enterprise',
-    tagline: 'Complete suite with analytics & RBAC',
-    modules: ['live-attendance', 'emp-360', 'payslip', 'role-mgmt', 'warning'],
-    badge: 'Full featured',
-    badgeColor: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
-  },
+const PRICE_TIERS: PriceTier[] = [
+  { label: '1–10 employees',  min: 1,  max: 10,       pricePerModule: 40, coreTotal: 160 },
+  { label: '11–20 employees', min: 11, max: 20,        pricePerModule: 30, coreTotal: 120 },
+  { label: '21–30 employees', min: 21, max: 30,        pricePerModule: 25, coreTotal: 100 },
+  { label: '31–50 employees', min: 31, max: 50,        pricePerModule: 20, coreTotal:  80 },
+  { label: '51+ employees',   min: 51, max: Infinity,  pricePerModule: 15, coreTotal:  60 },
 ]
 
+function getTier(empCount: number): PriceTier {
+  return PRICE_TIERS.find(t => empCount >= t.min && empCount <= t.max) ?? PRICE_TIERS[PRICE_TIERS.length - 1]
+}
+
 const MANDATORY_IDS = new Set(MODULES.filter(m => m.mandatory).map(m => m.id))
-const SETUP_FEE = 50_000
+const SETUP_FEE = 30_000
 const HARDWARE_FEE = 10_000
 const ONE_TIME = SETUP_FEE + HARDWARE_FEE
 const QUICK_COUNTS = [10, 25, 50, 100, 200, 500]
-
-const FAQS = [
-  { q: 'Is there a minimum number of employees?', a: 'No minimum — start with a single employee and scale up anytime. Pricing scales linearly.' },
-  { q: 'Can I add or remove optional modules later?', a: 'Yes. Changes take effect on your next billing cycle with zero renegotiation.' },
-  { q: 'Why are the 4 core modules mandatory?', a: 'Shift Management, Employee Management, Salary and View & Edit Punches form the operational backbone that every other module depends on.' },
-  { q: 'Is there a contract or lock-in period?', a: 'Month-to-month by default. Annual plans get a flat 10% discount across the full subscription.' },
-  { q: 'What does the hardware cost cover?', a: 'One Hikvision biometric terminal, pre-configured for your facility. Additional units available at ₹8,000 each.' },
-  { q: 'Do prices include GST?', a: 'Prices shown are exclusive of GST (18%). A GST invoice is issued for every transaction — UPI, NEFT/RTGS, credit & debit cards accepted.' },
-  { q: 'What kind of onboarding support is included?', a: 'Every plan includes on-site installation, data migration from your existing system, admin training session and 3 months of priority email support.' },
-  { q: 'Can I get a custom quote for large teams?', a: 'Yes. For teams above 300 employees we offer volume pricing. Contact sales and we will prepare a personalised quote within 24 hours.' },
-]
 
 const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
 
@@ -217,9 +192,9 @@ function InfoTooltip({ text }: { text: string }) {
 }
 
 function ModuleCard({
-  module, selected, onToggle, allSelected, disabledReason,
+  module, selected, onToggle, allSelected, disabledReason, tierPrice,
 }: {
-  module: Module; selected: boolean; onToggle: () => void; allSelected: Set<string>; disabledReason?: string
+  module: Module; selected: boolean; onToggle: () => void; allSelected: Set<string>; disabledReason?: string; tierPrice?: number
 }) {
   const locked = module.mandatory
   const softDisabled = !!disabledReason && !locked
@@ -284,17 +259,7 @@ function ModuleCard({
 
         <p className="text-xs text-muted-foreground leading-relaxed pl-9 mb-3">{module.description}</p>
 
-        {/* Price + dependency hint */}
-        <div className="flex items-center justify-between pl-9">
-          <span className={cn('text-xs font-bold tabular-nums', active && !softDisabled ? module.color.iconText : 'text-muted-foreground')}>
-            {module.flatPrice
-              ? `₹${module.flatPrice}/mo flat`
-              : `+₹${module.pricePerEmp}/emp/mo`}
-          </span>
-          {dependencyNames && !softDisabled && (
-            <InfoTooltip text={`Works best with: ${dependencyNames}`} />
-          )}
-        </div>
+       
       </button>
 
       {/* Admin-only banner — shown below card, not overlapping */}
@@ -308,17 +273,6 @@ function ModuleCard({
   )
 }
 
-function FaqItem({ item, open, onToggle }: { item: { q: string; a: string }; open: boolean; onToggle: () => void }) {
-  return (
-    <div className="border-b border-border last:border-0">
-      <button onClick={onToggle} className="w-full flex items-center justify-between py-4 text-left gap-4">
-        <span className="text-sm font-medium text-foreground">{item.q}</span>
-        {open ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
-      </button>
-      {open && <p className="text-sm text-muted-foreground pb-4 leading-relaxed">{item.a}</p>}
-    </div>
-  )
-}
 
 // ── Demo Modal ─────────────────────────────────────────────
 
@@ -457,9 +411,7 @@ export function PricingCalculator() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [empCount, setEmpCount] = useState(50)
   const [billing, setBilling] = useState<'monthly' | 'annual'>('monthly')
-  const [openFaq, setOpenFaq] = useState<number | null>(null)
   const [demoOpen, setDemoOpen] = useState(false)
-  const [activeBundle, setActiveBundle] = useState<string | null>(null)
   const [showStickyBar, setShowStickyBar] = useState(false)
   const [applicationType, setApplicationType] = useState<'all' | 'admin'>('all')
   const calcRef = useRef<HTMLDivElement>(null)
@@ -491,8 +443,7 @@ export function PricingCalculator() {
   // ── Toggle module ────────────────────────────────────────
   const toggleModule = useCallback((id: string) => {
     if (MANDATORY_IDS.has(id)) return
-    if (id === 'role-mgmt' && applicationType === 'admin') return  // blocked for admin-only
-    setActiveBundle(null)
+    if (id === 'role-mgmt' && applicationType === 'admin') return
     setSelected(prev => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
@@ -500,42 +451,41 @@ export function PricingCalculator() {
     })
   }, [applicationType])
 
-  // ── Apply bundle preset ──────────────────────────────────
-  const applyBundle = useCallback((bundle: Bundle) => {
-    setActiveBundle(bundle.id)
-    setSelected(new Set(bundle.modules))
-  }, [])
+  // ── Current tier based on employee count ─────────────────
+  const currentTier = useMemo(() => getTier(empCount), [empCount])
+
+  const mandatoryModules = MODULES.filter(m => m.mandatory)
+  const optionalModules = MODULES.filter(m => !m.mandatory)
+  // In admin mode, role-mgmt is not toggleable — exclude from "all selected" check
+  const selectableOptionals = optionalModules.filter(m => !(m.id === 'role-mgmt' && applicationType === 'admin'))
+  const allOptionalSelected = selectableOptionals.length > 0 && selectableOptionals.every(m => selected.has(m.id))
 
   // ── Calculations ─────────────────────────────────────────
   const { totalPerEmp, flatMonthly, monthly, annual, firstYear, annualSavings, activeCount } = useMemo(() => {
     const activeIds = new Set([...MANDATORY_IDS, ...selected])
     const activeModules = MODULES.filter(m => activeIds.has(m.id))
-    const perEmp = activeModules.filter(m => !m.flatPrice).reduce((s, m) => s + m.pricePerEmp, 0)
-    const flat = activeModules.filter(m => m.flatPrice).reduce((s, m) => s + (m.flatPrice ?? 0), 0)
+    // Mandatory modules use tiered price; optional non-flat modules use their own pricePerEmp
+    const mandatoryPerEmp = currentTier.pricePerModule * MANDATORY_IDS.size
+    // If ALL add-ons are selected → bundle deal: entire optional set costs ₹50/emp flat
+    const optionalPerEmp = allOptionalSelected
+      ? 50
+      : activeModules.filter(m => !m.mandatory && !m.flatPrice).reduce((s, m) => s + m.pricePerEmp, 0)
+    const perEmp = mandatoryPerEmp + optionalPerEmp
+    // Role mgmt flat fee still applies (₹200/mo) even in bundle deal
+    const flat = allOptionalSelected
+      ? (selected.has('role-mgmt') ? 200 : 0)
+      : activeModules.filter(m => m.flatPrice).reduce((s, m) => s + (m.flatPrice ?? 0), 0)
     const monthlyFull = perEmp * empCount + flat
     const discount = billing === 'annual' ? 0.9 : 1
     const monthly = Math.round(monthlyFull * discount)
     const annual = monthly * 12
     const annualSavings = billing === 'annual' ? Math.round(monthlyFull * 0.1 * 12) : 0
     return { totalPerEmp: perEmp, flatMonthly: flat, monthly, annual, firstYear: ONE_TIME + annual, annualSavings, activeCount: activeIds.size }
-  }, [selected, empCount, billing])
+  }, [selected, empCount, billing, currentTier, allOptionalSelected])
 
   const animatedMonthly = useAnimatedNumber(monthly)
   const animatedAnnual = useAnimatedNumber(annual)
   const animatedFirstYear = useAnimatedNumber(firstYear)
-
-  const mandatoryModules = MODULES.filter(m => m.mandatory)
-  const optionalModules = MODULES.filter(m => !m.mandatory)
-  const mandatoryTotal = mandatoryModules.reduce((s, m) => s + m.pricePerEmp, 0)
-  // In admin mode, role-mgmt is not toggleable — exclude it from the "all selected" check
-  const selectableOptionals = optionalModules.filter(m => !(m.id === 'role-mgmt' && applicationType === 'admin'))
-  const allOptionalSelected = selectableOptionals.length > 0 && selectableOptionals.every(m => selected.has(m.id))
-
-  // ROI estimates
-  const hrHourlyCost = 300  // ₹/hr estimated HR labour rate
-  const hoursPerEmpPerMonth = 1.5  // manual HR time per employee per month
-  const manualCostPerMonth = Math.round(hrHourlyCost * hoursPerEmpPerMonth * empCount)
-  const roiMonths = monthly > 0 ? Math.ceil(ONE_TIME / Math.max(manualCostPerMonth - monthly, 1)) : 0
 
   return (
     <>
@@ -570,31 +520,7 @@ export function PricingCalculator() {
 
       <div className="min-h-screen bg-background text-foreground">
 
-        {/* ── Hero ─────────────────────────────────────── */}
-        <div className="border-b border-border bg-gradient-to-b from-muted/40 to-background">
-          <div className="max-w-6xl mx-auto px-6 py-16 sm:py-20">
-            <p className="text-xs font-semibold tracking-[0.14em] uppercase text-muted-foreground mb-4">Pricing</p>
-            <h1 className="text-4xl sm:text-5xl font-bold tracking-tight leading-[1.1] mb-4">
-              Built for your team.<br className="hidden sm:block" /> Priced to fit.
-            </h1>
-            <p className="text-base text-muted-foreground max-w-lg leading-relaxed">
-              One setup fee. Per-employee subscription. Start with 4 core modules and
-              add exactly what your business needs — nothing more.
-            </p>
-            <div className="flex flex-wrap gap-3 mt-8">
-              {[
-                { label: `${MODULES.length} modules`, sub: 'to choose from' },
-                { label: '4 required', sub: 'operational core' },
-                { label: '₹0 hidden fees', sub: 'fully transparent' },
-              ].map(s => (
-                <div key={s.label} className="flex items-baseline gap-1.5 bg-card border border-border rounded-xl px-4 py-2.5">
-                  <span className="font-bold text-sm text-foreground">{s.label}</span>
-                  <span className="text-xs text-muted-foreground">{s.sub}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+       
 
         <div className="max-w-6xl mx-auto px-6 py-12 space-y-16">
 
@@ -620,179 +546,28 @@ export function PricingCalculator() {
             </p>
           </section>
 
-          {/* ── Calculator ────────────────────────────── */}
-          <section ref={calcRef}>
-            <SectionLabel>Cost calculator</SectionLabel>
-            <div className="grid lg:grid-cols-3 gap-4">
-
-              {/* Employee count + application type */}
-              <div className="rounded-2xl border border-border bg-card px-5 py-5">
-                <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-4">Team size</p>
-                <div className="flex items-baseline justify-between mb-4">
-                  <span className="text-4xl font-bold tabular-nums">{empCount}</span>
-                  <span className="text-sm text-muted-foreground">employees</span>
-                </div>
-                <input type="range" min={1} max={500} step={1} value={empCount}
-                  onChange={e => setEmpCount(Number(e.target.value))}
-                  className="w-full accent-foreground mb-4"
-                />
-                <div className="grid grid-cols-3 gap-1.5 mb-5">
-                  {QUICK_COUNTS.map(n => (
-                    <button key={n} onClick={() => setEmpCount(n)}
-                      className={cn(
-                        'py-1.5 rounded-lg text-xs font-semibold border transition-all',
-                        empCount === n ? 'bg-foreground text-background border-foreground' : 'border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground'
-                      )}
-                    >{n}</button>
-                  ))}
-                </div>
-
-                {/* Application needed dropdown */}
-                <div className="border-t border-border pt-4">
-                  <label className="text-xs font-semibold tracking-widest uppercase text-muted-foreground block mb-2">
-                    Application needed for
-                  </label>
-                  <div className="flex gap-2">
-                    {([
-                      { value: 'all', label: 'All Employees' },
-                      { value: 'admin', label: 'Only Admin' },
-                    ] as const).map(opt => (
-                      <button
-                        key={opt.value}
-                        onClick={() => setApplicationType(opt.value)}
-                        className={cn(
-                          'flex-1 py-2 px-3 rounded-xl border text-xs font-semibold transition-all',
-                          applicationType === opt.value
-                            ? 'bg-foreground text-background border-foreground'
-                            : 'border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground bg-card'
-                        )}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                  {applicationType === 'admin' && (
-                    <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400 leading-snug flex items-start gap-1">
-                      <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                      Role Management is not required for admin-only setup
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Billing + breakdown */}
-              <div className="rounded-2xl border border-border bg-card px-5 py-5 space-y-5">
-                <div>
-                  <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-3">Billing cycle</p>
-                  <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
-                    {(['monthly', 'annual'] as const).map(c => (
-                      <button key={c} onClick={() => setBilling(c)}
-                        className={cn(
-                          'flex-1 py-2 rounded-lg text-xs font-semibold capitalize transition-all',
-                          billing === c ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                        )}
-                      >
-                        {c} {c === 'annual' && billing !== 'annual' && <span className="text-emerald-500 font-bold ml-1">−10%</span>}
-                      </button>
-                    ))}
-                  </div>
-                  {billing === 'annual' && annualSavings > 0 && (
-                    <div className="mt-2 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 rounded-lg px-3 py-2">
-                      <TrendingUp className="w-3.5 h-3.5 shrink-0" />
-                      <span className="text-xs font-semibold">You save {inr(annualSavings)} per year</span>
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-3 pt-1">
-                  <div className="flex justify-between items-baseline">
-                    <span className="text-xs text-muted-foreground">{activeCount} modules active</span>
-                    <span className="text-sm font-bold tabular-nums">₹{totalPerEmp}/emp/mo{flatMonthly > 0 ? ` + ₹${flatMonthly} flat` : ''}</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span className="text-xs text-muted-foreground">Monthly total</span>
-                    <span className="text-sm font-bold tabular-nums">{inr(animatedMonthly)}</span>
-                  </div>
-                  <div className="flex justify-between items-baseline border-t border-border pt-3">
-                    <span className="text-xs text-muted-foreground">Annual total</span>
-                    <span className="text-sm font-bold tabular-nums">{inr(animatedAnnual)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* First-year card */}
-              <div className="rounded-2xl border border-border bg-card px-5 py-5 flex flex-col justify-between">
-                <div>
-                  <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground mb-2">First-year total</p>
-                  <p className="text-4xl font-bold tabular-nums mb-1 text-foreground">{inr(animatedFirstYear)}</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed mt-1">
-                    {inr(ONE_TIME)} one-time + {inr(animatedAnnual)} annual
-                  </p>
-                </div>
-                <Button variant="outline" onClick={() => setDemoOpen(true)}
-                  className="mt-6 border-border text-foreground hover:bg-muted gap-2 w-full justify-center">
-                  Get a quote <ArrowRight className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          </section>
-
-          {/* ── Bundle presets ────────────────────────── */}
-          <section>
-            <SectionLabel>Start with a bundle — or build your own below</SectionLabel>
-            <div className="grid sm:grid-cols-3 gap-4">
-              {BUNDLES.map(bundle => {
-                const allIds = new Set([...MANDATORY_IDS, ...bundle.modules])
-                const perEmp = MODULES.filter(m => allIds.has(m.id) && !m.flatPrice).reduce((s, m) => s + m.pricePerEmp, 0)
-                const flat = MODULES.filter(m => allIds.has(m.id) && m.flatPrice).reduce((s, m) => s + (m.flatPrice ?? 0), 0)
-                const isActive = activeBundle === bundle.id
-                return (
-                  <button
-                    key={bundle.id}
-                    onClick={() => applyBundle(bundle)}
-                    className={cn(
-                      'text-left rounded-2xl border p-5 transition-all duration-200',
-                      isActive
-                        ? 'border-foreground bg-foreground text-background ring-2 ring-foreground ring-offset-2 ring-offset-background'
-                        : 'border-border bg-card hover:border-foreground/40 hover:shadow-sm'
-                    )}
-                  >
-                    {bundle.badge && (
-                      <span className={cn('inline-block text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 rounded-full mb-3', isActive ? 'bg-background/20 text-background' : bundle.badgeColor)}>
-                        {bundle.badge}
-                      </span>
-                    )}
-                    <p className={cn('font-bold text-lg mb-0.5', isActive ? 'text-background' : 'text-foreground')}>{bundle.name}</p>
-                    <p className={cn('text-xs mb-4 leading-relaxed', isActive ? 'text-background/70' : 'text-muted-foreground')}>{bundle.tagline}</p>
-                    <p className={cn('text-2xl font-bold tabular-nums mb-0.5', isActive ? 'text-background' : 'text-foreground')}>
-                      ₹{perEmp}<span className={cn('text-sm font-normal ml-1', isActive ? 'text-background/60' : 'text-muted-foreground')}>/emp/mo</span>
-                    </p>
-                    {flat > 0 && (
-                      <p className={cn('text-xs mb-2', isActive ? 'text-background/50' : 'text-muted-foreground')}>
-                        + ₹{flat}/mo flat fees
-                      </p>
-                    )}
-                    <p className={cn('text-xs', isActive ? 'text-background/50' : 'text-muted-foreground')}>
-                      {MANDATORY_IDS.size + bundle.modules.length} modules included
-                    </p>
-                  </button>
-                )
-              })}
-            </div>
-          </section>
 
           {/* ── Modules ───────────────────────────────── */}
           <section>
             {/* Mandatory */}
             <div className="mb-10">
-              <SectionLabel>Mandatory modules — always included</SectionLabel>
+              
+
+              
+
               <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
                 {mandatoryModules.map(m => (
-                  <ModuleCard key={m.id} module={m} selected={true} onToggle={() => {}} allSelected={selected} />
+                  <ModuleCard
+                    key={m.id}
+                    module={m}
+                    selected={true}
+                    onToggle={() => {}}
+                    allSelected={selected}
+                    tierPrice={currentTier.pricePerModule}
+                  />
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground mt-3">
-                Base rate: <span className="font-semibold text-foreground">₹{mandatoryTotal}/emp/mo</span> — included in every plan.
-              </p>
+             
             </div>
 
             {/* Optional */}
@@ -804,11 +579,11 @@ export function PricingCalculator() {
                     <span className="font-semibold text-foreground">{selected.size}</span>/{optionalModules.length} added
                   </span>
                   {allOptionalSelected ? (
-                    <button onClick={() => { setSelected(new Set()); setActiveBundle(null) }} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors">
+                    <button onClick={() => { setSelected(new Set()) }} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors">
                       Clear all
                     </button>
                   ) : (
-                    <button onClick={() => { setSelected(new Set(selectableOptionals.map(m => m.id))); setActiveBundle(null) }} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors">
+                    <button onClick={() => { setSelected(new Set(selectableOptionals.map(m => m.id))) }} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors">
                       Select all
                     </button>
                   )}
@@ -822,6 +597,9 @@ export function PricingCalculator() {
                   style={{ width: `${(selected.size / optionalModules.length) * 100}%` }}
                 />
               </div>
+
+              {/* Bundle deal banner — appears when all add-ons are selected */}
+             
 
               <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
                 {optionalModules.map(m => (
@@ -840,141 +618,11 @@ export function PricingCalculator() {
             </div>
           </section>
 
-          {/* ── ROI estimator ─────────────────────────── */}
-          <section>
-            <SectionLabel>ROI estimator</SectionLabel>
-            <div className="rounded-2xl border border-border bg-card overflow-hidden">
-              <div className="px-6 py-5 border-b border-border flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-amber-500" />
-                <p className="text-sm font-semibold text-foreground">How quickly does this pay for itself?</p>
-              </div>
-              <div className="grid sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border">
-                {[
-                  {
-                    label: 'Manual HR cost / month',
-                    value: inr(manualCostPerMonth),
-                    sub: `${empCount} employees × ~1.5 hr HR time × ₹300/hr`,
-                    color: 'text-rose-600',
-                  },
-                  {
-                    label: 'System cost / month',
-                    value: inr(monthly),
-                    sub: `${activeCount} modules × ${empCount} employees`,
-                    color: 'text-foreground',
-                  },
-                  {
-                    label: 'Payback period',
-                    value: manualCostPerMonth > monthly ? `~${roiMonths} months` : 'Immediate',
-                    sub: manualCostPerMonth > monthly
-                      ? `Save ${inr(manualCostPerMonth - monthly)}/mo from day one`
-                      : 'System saves more than it costs',
-                    color: 'text-emerald-600',
-                  },
-                ].map(item => (
-                  <div key={item.label} className="px-6 py-5">
-                    <p className="text-xs text-muted-foreground mb-1">{item.label}</p>
-                    <p className={cn('text-2xl font-bold tabular-nums mb-1', item.color)}>{item.value}</p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{item.sub}</p>
-                  </div>
-                ))}
-              </div>
-              <p className="px-6 py-3 text-[11px] text-muted-foreground bg-muted/30">
-                Estimates based on ₹300/hr HR labour rate and ~1.5 hours of manual attendance/payroll work per employee per month. Adjust your employee count above to recalculate.
-              </p>
-            </div>
-          </section>
-
           {/* ── Quick reference table ─────────────────── */}
-          <section>
-            <SectionLabel>Quick reference — monthly cost by team size</SectionLabel>
-            <div className="rounded-2xl border border-border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/40">
-                    {['Employees', 'Per employee', 'Monthly', 'Annual', 'First year'].map((h, i) => (
-                      <th key={h} className={cn('py-3 px-5 text-xs font-semibold text-muted-foreground uppercase tracking-wider', i === 0 ? 'text-left' : 'text-right')}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[10, 25, 50, 100, 200].map((n, i) => {
-                    const discount = billing === 'annual' ? 0.9 : 1
-                    const m = Math.round((totalPerEmp * n + flatMonthly) * discount)
-                    const a = m * 12
-                    const fy = ONE_TIME + a
-                    const isActive = n === empCount
-                    return (
-                      <tr key={n} onClick={() => setEmpCount(n)}
-                        className={cn(
-                          'border-b border-border last:border-0 cursor-pointer transition-colors',
-                          isActive ? 'bg-muted/60' : i % 2 === 0 ? 'hover:bg-muted/30' : 'bg-muted/10 hover:bg-muted/30'
-                        )}
-                      >
-                        <td className="px-5 py-3.5 font-medium text-foreground">
-                          {n}
-                          {isActive && <span className="ml-2 text-[10px] font-bold bg-foreground text-background px-1.5 py-0.5 rounded">selected</span>}
-                        </td>
-                        <td className="px-5 py-3.5 text-right tabular-nums text-muted-foreground">₹{totalPerEmp}</td>
-                        <td className="px-5 py-3.5 text-right tabular-nums">{inr(m)}</td>
-                        <td className="px-5 py-3.5 text-right tabular-nums">{inr(a)}</td>
-                        <td className="px-5 py-3.5 text-right tabular-nums font-semibold">{inr(fy)}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              Click any row to update the calculator. Rates based on {activeCount} active modules at ₹{totalPerEmp}/emp/mo{flatMonthly > 0 ? ` + ₹${flatMonthly} flat/mo` : ''}.
-              {billing === 'annual' && ' Annual discount applied.'}
-            </p>
-          </section>
+         
 
-          {/* ── Included in every plan ────────────────── */}
-          <section>
-            <SectionLabel>Included in every plan</SectionLabel>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {[
-                { icon: <Cpu className="w-4 h-4" />, text: 'Hikvision biometric integration' },
-                { icon: <Zap className="w-4 h-4" />, text: 'Real-time attendance tracking' },
-                { icon: <FileText className="w-4 h-4" />, text: 'Automated PDF payslip generation' },
-                { icon: <Shield className="w-4 h-4" />, text: 'Role-based access control (RBAC)' },
-                { icon: <BarChart3 className="w-4 h-4" />, text: 'Overtime & late-penalty engine' },
-                { icon: <CheckCircle2 className="w-4 h-4" />, text: 'Dedicated onboarding & support' },
-              ].map(f => (
-                <div key={f.text} className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
-                  <span className="text-muted-foreground shrink-0">{f.icon}</span>
-                  <span className="text-sm text-foreground">{f.text}</span>
-                </div>
-              ))}
-            </div>
-          </section>
+       
 
-          {/* ── FAQ ───────────────────────────────────── */}
-          <section>
-            <SectionLabel>Frequently asked</SectionLabel>
-            <div className="rounded-2xl border border-border bg-card px-5">
-              {FAQS.map((item, i) => (
-                <FaqItem key={i} item={item} open={openFaq === i} onToggle={() => setOpenFaq(openFaq === i ? null : i)} />
-              ))}
-            </div>
-          </section>
-
-          {/* ── CTA ───────────────────────────────────── */}
-          <section className="rounded-2xl border border-border bg-card px-8 py-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
-            <div>
-              <h2 className="text-xl font-bold text-foreground mb-1">Ready to see it in action?</h2>
-              <p className="text-sm text-muted-foreground">Get a personalised demo for your team — no commitment required.</p>
-            </div>
-            <div className="flex gap-3 shrink-0">
-              <Button variant="outline" onClick={() => setDemoOpen(true)}>Contact sales</Button>
-              <Button className="gap-2" onClick={() => setDemoOpen(true)}>
-                Schedule a demo <ArrowRight className="w-4 h-4" />
-              </Button>
-            </div>
-          </section>
 
         </div>
       </div>

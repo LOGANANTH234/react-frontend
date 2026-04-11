@@ -11,7 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { AlertCircle, CalendarIcon } from "lucide-react"
+import { AlertCircle, CalendarIcon , ChevronRight, ChevronLeft } from "lucide-react"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { SearchableComboBox } from "./searchable-combo-box"
 import { MultiViewCalendar } from "./multi-view-calendar"
@@ -89,6 +89,18 @@ export function OvertimeDetailsScreen() {
     ]
   }, [data])
 
+  const handlePreviousDay = () => {
+    const prevDay = new Date(selectedDate)
+    prevDay.setDate(prevDay.getDate() - 1)
+    setSelectedDate(prevDay)
+  }
+
+  const handleNextDay = () => {
+    const nextDay = new Date(selectedDate)
+    nextDay.setDate(nextDay.getDate() + 1)
+    setSelectedDate(nextDay)
+  }
+
   return (
     <div className="w-full space-y-6 px-6 py-8">
       {/* Filters */}
@@ -106,27 +118,50 @@ export function OvertimeDetailsScreen() {
           </div>
           <div className="space-y-1 flex-shrink-0">
             <Label className="text-slate-700 font-semibold text-sm">Select Date</Label>
-            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
-                  <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
-                  <span className="text-slate-900 font-medium text-sm">
-                    {selectedDate.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
-                  </span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <MultiViewCalendar
-                  selected={selectedDate}
-                  onSelect={(date) => {
-                    setSelectedDate(date)
-                    setIsCalendarOpen(false)
-                  }}
-                  fromYear={2020}
-                  toYear={2030}
-                />
-              </PopoverContent>
-            </Popover>
+            <div className="flex items-center gap-2">
+             
+
+                  <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 border-slate-300 bg-white hover:bg-slate-50 text-slate-500 flex-shrink-0"
+                onClick={handlePreviousDay}
+                title="Previous day"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
+                    <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
+                    <span className="text-slate-900 font-medium text-sm">
+                      {selectedDate.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
+                    </span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <MultiViewCalendar
+                    selected={selectedDate}
+                    onSelect={(date) => {
+                      setSelectedDate(date)
+                      setIsCalendarOpen(false)
+                    }}
+                    fromYear={2020}
+                    toYear={2030}
+                  />
+                </PopoverContent>
+              </Popover>
+             
+                <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 border-slate-300 bg-white hover:bg-slate-50 text-slate-500 flex-shrink-0"
+                  onClick={handleNextDay}
+                title="Next day"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>

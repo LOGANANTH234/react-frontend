@@ -1248,8 +1248,7 @@ export default function EmployeeFormModal({ isOpen, employee, onClose, onSave }:
                             <SelectValue placeholder={!shift.amountType ? "Select Amount Type" : undefined} />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Per Shift">Per Shift</SelectItem>
-                            <SelectItem value="Per Day">Per Day</SelectItem>
+                           
                             <SelectItem value="Per Hour">Per Hour</SelectItem>
                             <SelectItem value="Per Month">Per Month</SelectItem>
                           </SelectContent>
