@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server"
 /**
  * Proxies POST /api/auth/login → Spring Boot backend.
  *
- * For local dev the backend runs on 3.109.152.136:8080 by default.
+ * For local dev the backend runs on http://3.109.152.136:8080 by default.
  * In production, set  API_BASE_URL=http://your-server:8080  in .env.local
  * (server-side env var — no NEXT_PUBLIC_ needed here).
  */
