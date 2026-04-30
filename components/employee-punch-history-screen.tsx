@@ -20,10 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  Loader2, CalendarIcon,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-} from 'lucide-react'
+import { Loader2, CalendarIcon } from 'lucide-react'
 import { format, parseISO, startOfDay } from 'date-fns'
 import { useAuth } from '@/lib/contexts/auth-context'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -42,16 +39,7 @@ interface PunchData {
   status: 'valid' | 'missing-out' | 'overlap' | 'edited'
 }
 
-interface PageResponse {
-  content: any[]
-  totalElements: number
-  totalPages: number
-  number: number
-  size: number
-}
-
 const PUNCH_SOURCES = ['HIKVISION', 'MANUAL', 'HIKVISION_MANUAL', 'SYSTEM_AUTO'] as const
-const PAGE_SIZE_OPTIONS = [100, 200, 300, 400, 500]
 
 export default function EmployeePunchHistoryScreen() {
   const { auth } = useAuth()
@@ -74,20 +62,11 @@ export default function EmployeePunchHistoryScreen() {
   const [isStartCalendarOpen, setIsStartCalendarOpen] = useState(false)
   const [isEndCalendarOpen, setIsEndCalendarOpen]     = useState(false)
 
-  // Server-side pagination
-  const [pageNo, setPageNo]               = useState(0)
-  const [pageSize, setPageSize]           = useState(100)
-  const [totalElements, setTotalElements] = useState(0)
-  const [totalPages, setTotalPages]       = useState(0)
-
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError]         = useState<string | null>(null)
 
   const startDateObj = startOfDay(parseISO(startDate))
   const endDateObj   = startOfDay(parseISO(endDate))
-
-  // Reset page when date range changes
-  useEffect(() => { setPageNo(0) }, [startDate, endDate])
 
   // ── server fetch ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -99,12 +78,12 @@ export default function EmployeePunchHistoryScreen() {
       try {
         const url =
           `http://3.109.152.136:8080/api/punch/history` +
-          `?startDate=${startDate}&endDate=${endDate}&page=${pageNo}&size=${pageSize}`
+          `?startDate=${startDate}&endDate=${endDate}&page=0&size=1000000`
 
         const res = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` } })
         if (!res.ok) throw new Error(`API error: ${res.statusText}`)
 
-        const page: PageResponse = await res.json()
+        const page = await res.json()
 
         const mapped: PunchData[] = (page.content || []).map((p: any) => ({
           id:           p.id?.toString() || Date.now().toString(),
@@ -120,14 +99,7 @@ export default function EmployeePunchHistoryScreen() {
         }))
 
         setPunchData(mapped)
-        setTotalElements(page.totalElements)
-        setTotalPages(page.totalPages)
-
-        // Accumulate employee names across pages for the dropdown
-        setUniqueEmployeeNames(prev => {
-          const merged = new Set([...prev, ...mapped.map(p => p.employeeName)])
-          return Array.from(merged).sort()
-        })
+        setUniqueEmployeeNames(Array.from(new Set(mapped.map(p => p.employeeName))).sort())
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch punch data')
         setPunchData([])
@@ -137,9 +109,9 @@ export default function EmployeePunchHistoryScreen() {
     }
 
     run()
-  }, [auth, startDate, endDate, pageNo, pageSize])
+  }, [auth, startDate, endDate])
 
-  // ── client-side filter within current page ─────────────────────────────────
+  // ── client-side filter ─────────────────────────────────────────────────────
   const filteredPunches = useMemo(() => {
     return punchData.filter(p => {
       if (employeeName !== 'all' && p.employeeName !== employeeName) return false
@@ -148,15 +120,6 @@ export default function EmployeePunchHistoryScreen() {
       return true
     })
   }, [punchData, employeeName, typeFilter, sourceFilter])
-
-  const startItem = totalElements === 0 ? 0 : pageNo * pageSize + 1
-  const endItem   = Math.min((pageNo + 1) * pageSize, totalElements)
-
-  // Compute totalPages client-side to guard against stale backend values
-  // when page size changes (e.g. 252 records / 400 per page = 1 page, not 6)
-  const computedTotalPages = totalElements === 0 ? 0 : Math.ceil(totalElements / pageSize)
-  const isFirstPage = pageNo === 0
-  const isLastPage  = endItem >= totalElements
 
   if (!hasModuleAccess) {
     return (
@@ -174,181 +137,106 @@ export default function EmployeePunchHistoryScreen() {
         <h2 className="text-2xl font-bold">Employee Punch History</h2>
       </div>
 
-      {/* ── Filters + Pagination ─────────────────────────────────────────────── */}
+      {/* ── Filters ──────────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
-        <div className="flex flex-wrap gap-4 items-end justify-between">
+        <div className="flex flex-wrap gap-4 items-end">
 
-          {/* Left: all filter controls */}
-          <div className="flex flex-wrap gap-4 items-end">
-
-            {/* Employee */}
-            <div className="space-y-1 flex-shrink-0">
-              <Label className="text-slate-700 font-semibold text-sm">Employee</Label>
-              <Select value={employeeName} onValueChange={setEmployeeName}>
-                <SelectTrigger className="h-9 w-44 text-sm bg-white border-slate-300">
-                  <SelectValue placeholder="All Employees" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Employees</SelectItem>
-                  {uniqueEmployeeNames.map(name => (
-                    <SelectItem key={name} value={name}>{name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Start Date */}
-            <div className="space-y-1 flex-shrink-0">
-              <Label className="text-slate-700 font-semibold text-sm">Start Date</Label>
-              <Popover open={isStartCalendarOpen} onOpenChange={setIsStartCalendarOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
-                    <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
-                    <span className="text-slate-900 font-medium text-sm">{format(startDateObj, 'MMM dd, yyyy')}</span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <MultiViewCalendar
-                    selected={startDateObj}
-                    onSelect={(date) => { setStartDate(format(date, 'yyyy-MM-dd')); setIsStartCalendarOpen(false) }}
-                    fromYear={2020} toYear={2030}
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {/* End Date */}
-            <div className="space-y-1 flex-shrink-0">
-              <Label className="text-slate-700 font-semibold text-sm">End Date</Label>
-              <Popover open={isEndCalendarOpen} onOpenChange={setIsEndCalendarOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
-                    <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
-                    <span className="text-slate-900 font-medium text-sm">{format(endDateObj, 'MMM dd, yyyy')}</span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <MultiViewCalendar
-                    selected={endDateObj}
-                    onSelect={(date) => { setEndDate(format(date, 'yyyy-MM-dd')); setIsEndCalendarOpen(false) }}
-                    fromYear={2020} toYear={2030}
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {/* Type */}
-            <div className="space-y-1 flex-shrink-0">
-              <Label className="text-slate-700 font-semibold text-sm">Type</Label>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="h-9 w-32 text-sm bg-white border-slate-300">
-                  <SelectValue placeholder="All Types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="IN">IN</SelectItem>
-                  <SelectItem value="OUT">OUT</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Source */}
-            <div className="space-y-1 flex-shrink-0">
-              <Label className="text-slate-700 font-semibold text-sm">Source</Label>
-              <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                <SelectTrigger className="h-9 w-44 text-sm bg-white border-slate-300">
-                  <SelectValue placeholder="All Sources" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Sources</SelectItem>
-                  {PUNCH_SOURCES.map(s => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Employee */}
+          <div className="space-y-1 flex-shrink-0">
+            <Label className="text-slate-700 font-semibold text-sm">Employee</Label>
+            <Select value={employeeName} onValueChange={setEmployeeName}>
+              <SelectTrigger className="h-9 w-44 text-sm bg-white border-slate-300">
+                <SelectValue placeholder="All Employees" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees</SelectItem>
+                {uniqueEmployeeNames.map(name => (
+                  <SelectItem key={name} value={name}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Right: total count + rows-per-page + 4-button page nav */}
-          <div className="flex items-end gap-4 flex-shrink-0">
+          {/* Start Date */}
+          <div className="space-y-1 flex-shrink-0">
+            <Label className="text-slate-700 font-semibold text-sm">Start Date</Label>
+            <Popover open={isStartCalendarOpen} onOpenChange={setIsStartCalendarOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
+                  <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
+                  <span className="text-slate-900 font-medium text-sm">{format(startDateObj, 'MMM dd, yyyy')}</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <MultiViewCalendar
+                  selected={startDateObj}
+                  onSelect={(date) => { setStartDate(format(date, 'yyyy-MM-dd')); setIsStartCalendarOpen(false) }}
+                  fromYear={2020} toYear={2030}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
 
-            {/* Total record count */}
-            {!isLoading && totalElements > 0 && (
-              <div className="space-y-1">
-                <Label className="text-slate-700 font-semibold text-sm">Total Records</Label>
-                <div className="h-9 flex items-center px-3 rounded-md border border-slate-300 bg-slate-50">
-                  <span className="text-sm font-bold text-slate-800">{totalElements.toLocaleString()}</span>
-                </div>
+          {/* End Date */}
+          <div className="space-y-1 flex-shrink-0">
+            <Label className="text-slate-700 font-semibold text-sm">End Date</Label>
+            <Popover open={isEndCalendarOpen} onOpenChange={setIsEndCalendarOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
+                  <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
+                  <span className="text-slate-900 font-medium text-sm">{format(endDateObj, 'MMM dd, yyyy')}</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <MultiViewCalendar
+                  selected={endDateObj}
+                  onSelect={(date) => { setEndDate(format(date, 'yyyy-MM-dd')); setIsEndCalendarOpen(false) }}
+                  fromYear={2020} toYear={2030}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* Type */}
+          <div className="space-y-1 flex-shrink-0">
+            <Label className="text-slate-700 font-semibold text-sm">Type</Label>
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="h-9 w-32 text-sm bg-white border-slate-300">
+                <SelectValue placeholder="All Types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                <SelectItem value="IN">IN</SelectItem>
+                <SelectItem value="OUT">OUT</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Source */}
+          <div className="space-y-1 flex-shrink-0">
+            <Label className="text-slate-700 font-semibold text-sm">Source</Label>
+            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+              <SelectTrigger className="h-9 w-44 text-sm bg-white border-slate-300">
+                <SelectValue placeholder="All Sources" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sources</SelectItem>
+                {PUNCH_SOURCES.map(s => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Total record count */}
+          {!isLoading && filteredPunches.length > 0 && (
+            <div className="space-y-1 flex-shrink-0">
+              <Label className="text-slate-700 font-semibold text-sm">Total Records</Label>
+              <div className="h-9 flex items-center px-3 rounded-md border border-slate-300 bg-slate-50">
+                <span className="text-sm font-bold text-slate-800">{filteredPunches.length.toLocaleString()}</span>
               </div>
-            )}
-
-            {computedTotalPages > 0 && (
-              <>
-                {/* Rows per page */}
-                <div className="space-y-1">
-                  <Label className="text-slate-700 font-semibold text-sm">Rows per page</Label>
-                  <Select
-                    value={String(pageSize)}
-                    onValueChange={(v) => { setPageSize(Number(v)); setPageNo(0) }}
-                  >
-                    <SelectTrigger className="h-9 w-24 text-sm bg-white border-slate-300">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PAGE_SIZE_OPTIONS.map(s => (
-                        <SelectItem key={s} value={String(s)}>{s}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Page info + 4 navigation buttons */}
-                <div className="space-y-1">
-                  <Label className="text-slate-700 font-semibold text-sm">
-                    Page {pageNo + 1} of {computedTotalPages}
-                  </Label>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="outline" size="icon"
-                      className="h-9 w-9 border-slate-300 bg-white"
-                      onClick={() => setPageNo(0)}
-                      disabled={isFirstPage}
-                      title="First page"
-                    >
-                      <ChevronsLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline" size="icon"
-                      className="h-9 w-9 border-slate-300 bg-white"
-                      onClick={() => setPageNo(p => Math.max(0, p - 1))}
-                      disabled={isFirstPage}
-                      title="Previous page"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline" size="icon"
-                      className="h-9 w-9 border-slate-300 bg-white"
-                      onClick={() => setPageNo(p => Math.min(computedTotalPages - 1, p + 1))}
-                      disabled={isLastPage}
-                      title="Next page"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline" size="icon"
-                      className="h-9 w-9 border-slate-300 bg-white"
-                      onClick={() => setPageNo(computedTotalPages - 1)}
-                      disabled={isLastPage}
-                      title="Last page"
-                    >
-                      <ChevronsRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+            </div>
+          )}
 
         </div>
       </div>
@@ -362,13 +250,8 @@ export default function EmployeePunchHistoryScreen() {
 
       {/* ── Table ───────────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div className="p-4 border-b border-slate-200 bg-slate-50">
           <h2 className="text-sm font-semibold text-slate-900">Punch Records</h2>
-          {!isLoading && totalElements > 0 && (
-            <span className="text-xs text-slate-500">
-              Showing {startItem}–{endItem} of {totalElements.toLocaleString()} records
-            </span>
-          )}
         </div>
         <div className="overflow-x-auto">
           <Table>

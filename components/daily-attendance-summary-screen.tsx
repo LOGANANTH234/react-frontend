@@ -8,10 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import {
-  CalendarIcon, Loader2,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-} from 'lucide-react'
+import { CalendarIcon, Loader2 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { MultiViewCalendar } from '@/components/multi-view-calendar'
 
@@ -22,20 +19,10 @@ interface AttendanceSummaryRecord {
   attendanceDate: string
   firstIn: string
   lastOut: string
-  workedMinutes: string | number   // API returns "11h:12m" string
-  breakMinutes: string | number    // API returns "0h:58m" string
+  workedMinutes: string | number
+  breakMinutes: string | number
   liveStatus?: string
 }
-
-interface PageResponse {
-  content: AttendanceSummaryRecord[]
-  totalElements: number
-  totalPages: number
-  number: number
-  size: number
-}
-
-const PAGE_SIZE_OPTIONS = [100, 200, 300, 400, 500]
 
 export default function DailyAttendanceSummaryScreen() {
   const { auth } = useAuth()
@@ -53,20 +40,11 @@ export default function DailyAttendanceSummaryScreen() {
   const [isStartCalendarOpen, setIsStartCalendarOpen] = useState(false)
   const [isEndCalendarOpen, setIsEndCalendarOpen]     = useState(false)
 
-  // Server-side pagination
-  const [pageNo, setPageNo]               = useState(0)
-  const [pageSize, setPageSize]           = useState(100)
-  const [totalElements, setTotalElements] = useState(0)
-  const [totalPages, setTotalPages]       = useState(0)
-
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError]         = useState<string | null>(null)
 
   const startDateObj = parseISO(startDate)
   const endDateObj   = parseISO(endDate)
-
-  // Reset to page 0 when date range changes
-  useEffect(() => { setPageNo(0) }, [startDate, endDate])
 
   // ── fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -79,8 +57,8 @@ export default function DailyAttendanceSummaryScreen() {
         const params = new URLSearchParams({
           startDate,
           endDate,
-          page: String(pageNo),
-          size: String(pageSize),
+          page: '0',
+          size: '1000000',
         })
 
         const res = await fetch(
@@ -89,17 +67,12 @@ export default function DailyAttendanceSummaryScreen() {
         )
         if (!res.ok) throw new Error(`API error: ${res.statusText}`)
 
-        const page: PageResponse = await res.json()
+        const page = await res.json()
 
         setSummaryData(page.content || [])
-        setTotalElements(page.totalElements)
-        setTotalPages(page.totalPages)
-
-        // Accumulate employee names across pages
-        setUniqueEmployeeNames(prev => {
-          const merged = new Set([...prev, ...(page.content || []).map(r => r.employeeName)])
-          return Array.from(merged).sort()
-        })
+        setUniqueEmployeeNames(
+          Array.from(new Set((page.content || []).map((r: AttendanceSummaryRecord) => r.employeeName))).sort() as string[]
+        )
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred')
         setSummaryData([])
@@ -109,27 +82,18 @@ export default function DailyAttendanceSummaryScreen() {
     }
 
     run()
-  }, [auth, startDate, endDate, pageNo, pageSize])
+  }, [auth, startDate, endDate])
 
-  // Client-side employee filter within current page
+  // Client-side employee filter
   const filteredData = summaryData.filter(r =>
     employeeFilter === 'all' || r.employeeName === employeeFilter
   )
-
-  const startItem = totalElements === 0 ? 0 : pageNo * pageSize + 1
-  const endItem   = Math.min((pageNo + 1) * pageSize, totalElements)
-
-  // Compute totalPages client-side to guard against stale backend values
-  const computedTotalPages = totalElements === 0 ? 0 : Math.ceil(totalElements / pageSize)
-  const isFirstPage = pageNo === 0
-  const isLastPage  = endItem >= totalElements
 
   const formatDateTime = (s: string) => {
     if (!s) return 'N/A'
     try { return format(parseISO(s), 'MMM dd, yyyy HH:mm') } catch { return s }
   }
 
-  // API returns either a string like "11h:12m" or a number of minutes
   const formatDuration = (val: string | number | undefined) => {
     if (val === null || val === undefined || val === '') return '—'
     if (typeof val === 'string') {
@@ -147,150 +111,75 @@ export default function DailyAttendanceSummaryScreen() {
   return (
     <div className="w-full space-y-6 p-6">
 
-      {/* ── Filters + Pagination ─────────────────────────────────────────────── */}
+      {/* ── Filters ──────────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
-        <div className="flex flex-wrap gap-4 items-end justify-between">
+        <div className="flex flex-wrap gap-4 items-end">
 
-          {/* Left: filter controls */}
-          <div className="flex flex-wrap gap-4 items-end">
-
-            {/* Employee */}
-            <div className="space-y-1 flex-shrink-0">
-              <Label className="text-slate-700 font-semibold text-sm">Employee</Label>
-              <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-                <SelectTrigger className="h-9 w-44 text-sm bg-white border-slate-300">
-                  <SelectValue placeholder="All Employees" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Employees</SelectItem>
-                  {uniqueEmployeeNames.map(name => (
-                    <SelectItem key={name} value={name}>{name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Start Date */}
-            <div className="space-y-1 flex-shrink-0">
-              <Label className="text-slate-700 font-semibold text-sm">From Date</Label>
-              <Popover open={isStartCalendarOpen} onOpenChange={setIsStartCalendarOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
-                    <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
-                    <span className="text-slate-900 font-medium text-sm">{format(startDateObj, 'MMM dd, yyyy')}</span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <MultiViewCalendar
-                    selected={startDateObj}
-                    onSelect={(date) => { setStartDate(format(date, 'yyyy-MM-dd')); setIsStartCalendarOpen(false) }}
-                    fromYear={2020} toYear={2030}
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {/* End Date */}
-            <div className="space-y-1 flex-shrink-0">
-              <Label className="text-slate-700 font-semibold text-sm">To Date</Label>
-              <Popover open={isEndCalendarOpen} onOpenChange={setIsEndCalendarOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
-                    <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
-                    <span className="text-slate-900 font-medium text-sm">{format(endDateObj, 'MMM dd, yyyy')}</span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <MultiViewCalendar
-                    selected={endDateObj}
-                    onSelect={(date) => { setEndDate(format(date, 'yyyy-MM-dd')); setIsEndCalendarOpen(false) }}
-                    fromYear={2020} toYear={2030}
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
+          {/* Employee */}
+          <div className="space-y-1 flex-shrink-0">
+            <Label className="text-slate-700 font-semibold text-sm">Employee</Label>
+            <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+              <SelectTrigger className="h-9 w-44 text-sm bg-white border-slate-300">
+                <SelectValue placeholder="All Employees" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees</SelectItem>
+                {uniqueEmployeeNames.map(name => (
+                  <SelectItem key={name} value={name}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Right: total count + rows-per-page + 4-button page nav */}
-          <div className="flex items-end gap-4 flex-shrink-0">
+          {/* Start Date */}
+          <div className="space-y-1 flex-shrink-0">
+            <Label className="text-slate-700 font-semibold text-sm">From Date</Label>
+            <Popover open={isStartCalendarOpen} onOpenChange={setIsStartCalendarOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
+                  <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
+                  <span className="text-slate-900 font-medium text-sm">{format(startDateObj, 'MMM dd, yyyy')}</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <MultiViewCalendar
+                  selected={startDateObj}
+                  onSelect={(date) => { setStartDate(format(date, 'yyyy-MM-dd')); setIsStartCalendarOpen(false) }}
+                  fromYear={2020} toYear={2030}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
 
-            {/* Total record count */}
-            {!isLoading && totalElements > 0 && (
-              <div className="space-y-1">
-                <Label className="text-slate-700 font-semibold text-sm">Total Records</Label>
-                <div className="h-9 flex items-center px-3 rounded-md border border-slate-300 bg-slate-50">
-                  <span className="text-sm font-bold text-slate-800">{totalElements.toLocaleString()}</span>
-                </div>
+          {/* End Date */}
+          <div className="space-y-1 flex-shrink-0">
+            <Label className="text-slate-700 font-semibold text-sm">To Date</Label>
+            <Popover open={isEndCalendarOpen} onOpenChange={setIsEndCalendarOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="h-9 px-2 py-1 justify-start text-left font-normal bg-white border-slate-300 hover:bg-slate-50 hover:border-slate-400 text-slate-900 text-sm">
+                  <CalendarIcon className="mr-1 h-3 w-3 text-slate-600 flex-shrink-0" />
+                  <span className="text-slate-900 font-medium text-sm">{format(endDateObj, 'MMM dd, yyyy')}</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <MultiViewCalendar
+                  selected={endDateObj}
+                  onSelect={(date) => { setEndDate(format(date, 'yyyy-MM-dd')); setIsEndCalendarOpen(false) }}
+                  fromYear={2020} toYear={2030}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* Total record count */}
+          {!isLoading && filteredData.length > 0 && (
+            <div className="space-y-1 flex-shrink-0">
+              <Label className="text-slate-700 font-semibold text-sm">Total Records</Label>
+              <div className="h-9 flex items-center px-3 rounded-md border border-slate-300 bg-slate-50">
+                <span className="text-sm font-bold text-slate-800">{filteredData.length.toLocaleString()}</span>
               </div>
-            )}
-
-            {computedTotalPages > 0 && (
-              <>
-                {/* Rows per page */}
-                <div className="space-y-1">
-                  <Label className="text-slate-700 font-semibold text-sm">Rows per page</Label>
-                  <Select
-                    value={String(pageSize)}
-                    onValueChange={(v) => { setPageSize(Number(v)); setPageNo(0) }}
-                  >
-                    <SelectTrigger className="h-9 w-24 text-sm bg-white border-slate-300">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PAGE_SIZE_OPTIONS.map(s => (
-                        <SelectItem key={s} value={String(s)}>{s}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Page info + 4 navigation buttons */}
-                <div className="space-y-1">
-                  <Label className="text-slate-700 font-semibold text-sm">
-                    Page {pageNo + 1} of {computedTotalPages}
-                  </Label>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="outline" size="icon"
-                      className="h-9 w-9 border-slate-300 bg-white"
-                      onClick={() => setPageNo(0)}
-                      disabled={isFirstPage}
-                      title="First page"
-                    >
-                      <ChevronsLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline" size="icon"
-                      className="h-9 w-9 border-slate-300 bg-white"
-                      onClick={() => setPageNo(p => Math.max(0, p - 1))}
-                      disabled={isFirstPage}
-                      title="Previous page"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline" size="icon"
-                      className="h-9 w-9 border-slate-300 bg-white"
-                      onClick={() => setPageNo(p => Math.min(computedTotalPages - 1, p + 1))}
-                      disabled={isLastPage}
-                      title="Next page"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline" size="icon"
-                      className="h-9 w-9 border-slate-300 bg-white"
-                      onClick={() => setPageNo(computedTotalPages - 1)}
-                      disabled={isLastPage}
-                      title="Last page"
-                    >
-                      <ChevronsRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+            </div>
+          )}
 
         </div>
       </div>
@@ -304,13 +193,8 @@ export default function DailyAttendanceSummaryScreen() {
 
       {/* ── Table ───────────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div className="p-4 border-b border-slate-200 bg-slate-50">
           <h2 className="text-sm font-semibold text-slate-900">Attendance Summary</h2>
-          {!isLoading && totalElements > 0 && (
-            <span className="text-xs text-slate-500">
-              Showing {startItem}–{endItem} of {totalElements.toLocaleString()} records
-            </span>
-          )}
         </div>
         <div className="overflow-x-auto">
           <Table>
