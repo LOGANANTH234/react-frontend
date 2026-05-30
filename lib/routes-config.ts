@@ -58,6 +58,9 @@ export const ROUTE_CONFIG = {
   "/salary": {
     requiredModule: MODULES.SALARY,
   },
+  "/advance-management": {
+  requiredModule: MODULES.Advance_Management,
+},
 } as const
 
 // Helper function to get required module for a route

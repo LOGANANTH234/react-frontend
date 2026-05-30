@@ -22,6 +22,7 @@ export function AppNavigation() {
   const hasViewEditPunches = useHasModule(MODULES.VIEW_EDIT_PUNCHES)
   const hasSalary = useHasModule(MODULES.SALARY)
   const hasWarning = useHasModule(MODULES.WARNING)
+  const hasAdvance = useHasModule(MODULES.Advance_Management)
 
   const allNavItems = [
     {
@@ -144,6 +145,18 @@ export function AppNavigation() {
       activeText: "text-white",
       hoverBg: "hover:bg-amber-50",
       hasAccess: hasWarning,
+    },
+
+     {
+      name: "Advance Management",
+        href: "/advance-management",
+      icon: AlertTriangle,
+      color: "text-amber-600",
+      bgColor: "bg-amber-100",
+      activeBg: "bg-amber-500",
+      activeText: "text-white",
+      hoverBg: "hover:bg-amber-50",
+      hasAccess: hasAdvance,
     },
   ]
 

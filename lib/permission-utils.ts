@@ -15,6 +15,7 @@ export const MODULES = {
   VIEW_EDIT_PUNCHES: "VIEW_EDIT_PUNCHES",
   SALARY: "SALARY",
   WARNING: "WARNING",
+Advance_Management: "ADVANCE_MANAGEMENT",
 } as const
 
 // Action codes from backend
@@ -182,6 +183,14 @@ export function getAllModulesWithActions() {
       moduleName: "Warning",
       actions: [
         { actionCode: ACTIONS.WARNING_VIEW, actionName: "View Warning" },
+      ],
+    },
+
+     {
+      moduleCode: MODULES.Advance_Management,
+      moduleName: "Advance Management",
+      actions: [
+       
       ],
     },
   ]

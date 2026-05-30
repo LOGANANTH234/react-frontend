@@ -13,6 +13,7 @@ const modules = [
   { icon: Gift,          label: "Holiday Management",   desc: "Define holidays that auto-factor into attendance calculations." },
   { icon: ClipboardEdit, label: "View & Edit Punches",  desc: "Review and correct punch records across any date range." },
   { icon: DollarSign,    label: "Salary Reports",       desc: "Consolidated salary view and daily breakdowns for payroll." },
+  { icon:DollarSign,    label: "Advance Management",   desc: "Track salary advances, manage deductions, and monitor employee balances." },
 ]
 
 export default function HomePage() {

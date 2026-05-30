@@ -206,11 +206,10 @@ export default function ViewEditPunchesScreen() {
       setEmployeeList(mapped)
       console.log('[v0] employeeList set with', mapped.length, 'entries')
 
-      // ── Auto-select the first employee as the default filter ──────────────
+      // Auto-select the first employee as the default filter
       if (mapped.length > 0) {
         setFilters(prev => ({ ...prev, employeeName: mapped[0].name }))
       }
-      // ──────────────────────────────────────────────────────────────────────
     } catch (err) {
       console.error('[v0] Error fetching employees:', err)
     } finally {
@@ -323,10 +322,6 @@ export default function ViewEditPunchesScreen() {
   const handleDateChange = (dateStr: string) => {
     setSelectedDate(dateStr)
     fetchPunchData(dateStr)
-  }
-
-  const isSelectedDateToday = (): boolean => {
-    return selectedDate === todayDate
   }
 
   const convertTo12Hour = (time: string): string => {
@@ -584,7 +579,7 @@ export default function ViewEditPunchesScreen() {
           <p className="text-muted-foreground mt-1">Manage Employee Punch Records</p>
         </div>
 
-        {/* Date Header with Navigation — Refresh button moved next to calendar */}
+        {/* Date Header with Navigation */}
         <div className="flex items-center gap-3 py-4 border-b border-slate-200 dark:border-slate-700">
           <Button
             onClick={handlePreviousDay}
@@ -623,7 +618,7 @@ export default function ViewEditPunchesScreen() {
             <ChevronRight className="w-5 h-5 text-slate-600 dark:text-slate-400" />
           </Button>
 
-          {/* Refresh button — now inline next to calendar navigation */}
+          {/* Refresh button */}
           <Button
             onClick={handleLoadPunches}
             variant="outline"
@@ -638,19 +633,16 @@ export default function ViewEditPunchesScreen() {
 
       {/* Filters */}
       <Card className="p-6 space-y-4">
-        
-
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
             {error}
           </div>
         )}
 
-
         {/* Inputs row */}
         <div className="flex items-center gap-3">
 
-          {/* Employee Filter — no "All Employees" option, first employee auto-selected */}
+          {/* Employee Filter */}
           <div className="w-48">
             <Select
               value={filters.employeeName}
@@ -695,7 +687,6 @@ export default function ViewEditPunchesScreen() {
               onClick={() => setIsAddModalOpen(true)}
               variant="outline"
               className="h-9 gap-1 text-sm px-3 whitespace-nowrap"
-              disabled={isSelectedDateToday()}
             >
               <Plus className="w-3 h-3" />
               Add
@@ -708,7 +699,6 @@ export default function ViewEditPunchesScreen() {
               onClick={handleResetChanges}
               variant="destructive"
               className="h-9 gap-1 text-sm px-3 whitespace-nowrap"
-              disabled={isSelectedDateToday()}
             >
               <RefreshCw className="w-3 h-3" />
               Reset
@@ -764,7 +754,6 @@ export default function ViewEditPunchesScreen() {
                             setIsEditModalOpen(true)
                           }}
                           className="gap-1"
-                          disabled={isSelectedDateToday()}
                         >
                           <Edit2 className="w-3 h-3" />
                           Edit
@@ -777,7 +766,6 @@ export default function ViewEditPunchesScreen() {
                             setSelectedPunch(punch)
                             setIsDeleteModalOpen(true)
                           }}
-                          disabled={isSelectedDateToday()}
                         >
                           <Trash2 className="w-3 h-3" />
                           Delete
@@ -802,7 +790,7 @@ export default function ViewEditPunchesScreen() {
         workDate={selectedDate}
         employeeId={
           filters.employeeName
-            ? employeeList.find(e => e.name === filters.employeeName)?.employeeId || 
+            ? employeeList.find(e => e.name === filters.employeeName)?.employeeId ||
               apiPunchData.find(p => p.employeeName === filters.employeeName)?.employeeId
             : undefined
         }

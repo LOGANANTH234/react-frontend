@@ -57,16 +57,12 @@ export default function ShiftFormModal({
       isEditMode.current = true
       allowDurationAutoCalc.current = false
 
-      console.log("[v0] Initializing form with shift:", initialShift.name, "endTime:", initialShift.endTime)
-
       const diffHours = initialShift.shiftDurationHr || 0
       const diffMinutes = initialShift.shiftDurationMin || 0
 
-      // Set duration state FIRST
       setDurationHours(diffHours)
       setDurationMinutes(diffMinutes)
 
-      // Then set all form data
       setFormData({
         name: initialShift.name,
         startTime: initialShift.startTime,
@@ -79,23 +75,10 @@ export default function ShiftFormModal({
           60,
         shiftType: initialShift.shiftType || "",
       })
-
-      console.log(
-        "[v0] Form initialized with endTime:",
-        initialShift.endTime,
-        "duration:",
-        diffHours,
-        "hrs",
-        diffMinutes,
-        "mins",
-        "grace:",
-        initialShift.gracePeriod?.lateIn ?? 5,
-      )
     } else if (isOpen && !initialShift) {
       isEditMode.current = false
       allowDurationAutoCalc.current = true
 
-      // Reset to default for new shift
       setDurationHours(9)
       setDurationMinutes(0)
       setFormData({
@@ -116,57 +99,33 @@ export default function ShiftFormModal({
   }, [isOpen, initialShift])
 
   useEffect(() => {
-    // Allow calculation if user manually changed duration
     if (allowDurationAutoCalc.current) {
-      console.log("[v0] User manually changed duration, allowing auto-calculation")
+      // user manually changed duration
     } else if (isEditMode.current) {
-      console.log("[v0] Skipping endTime auto-calculation (editing existing shift)")
       return
     }
 
-    if (!durationHours && !durationMinutes) {
-      return
-    }
-
-    if (!formData.startTime) {
-      console.log("[v0] Skipping endTime calculation: no start time")
-      return
-    }
+    if (!durationHours && !durationMinutes) return
+    if (!formData.startTime) return
 
     const startMinutes = timeToMinutes(formData.startTime)
-    if (isNaN(startMinutes) || isNaN(durationHours) || isNaN(durationMinutes)) {
-      console.log("[v0] Skipping endTime calculation: invalid time values")
-      return
-    }
+    if (isNaN(startMinutes) || isNaN(durationHours) || isNaN(durationMinutes)) return
 
     let endMinutes = startMinutes + durationHours * 60 + durationMinutes
-
-    if (endMinutes >= 24 * 60) {
-      endMinutes -= 24 * 60
-    }
+    if (endMinutes >= 24 * 60) endMinutes -= 24 * 60
 
     const newEndTime = minutesToTime(endMinutes)
 
     if (newEndTime !== formData.endTime) {
-      console.log("[v0] Calculating new endTime from duration:", newEndTime)
       const newTotal = calculateTotalMinutes(formData.startTime, newEndTime, formData.breaks, formData.lunch) / 60
-
-      setFormData((prev) => ({
-        ...prev,
-        endTime: newEndTime,
-        totalHours: newTotal,
-      }))
+      setFormData((prev) => ({ ...prev, endTime: newEndTime, totalHours: newTotal }))
     }
   }, [durationHours, durationMinutes, formData.startTime])
 
   useEffect(() => {
     const newTotal = calculateTotalMinutes(formData.startTime, formData.endTime, formData.breaks, formData.lunch) / 60
     if (Math.abs(newTotal - formData.totalHours) > 0.01) {
-      console.log("[v0] Recalculating total hours:", newTotal)
-      setFormData((prev) => ({
-        ...prev,
-        totalHours: newTotal,
-      }))
+      setFormData((prev) => ({ ...prev, totalHours: newTotal }))
     }
   }, [formData.breaks, formData.lunch, formData.startTime, formData.endTime])
 
@@ -177,7 +136,8 @@ export default function ShiftFormModal({
       newErrors.name = "Shift name is required"
     }
 
-    if (existingNames.includes(formData.name)) {
+    // Allow the same name only if it belongs to the shift being edited
+    if (existingNames.includes(formData.name) && formData.name !== initialShift?.name) {
       newErrors.name = "This shift name already exists"
     }
 
@@ -191,14 +151,12 @@ export default function ShiftFormModal({
       if (timeToMinutes(b.start) >= timeToMinutes(b.end)) {
         newErrors[`break-${idx}-range`] = "Break end must be after start"
       }
-
       for (let i = 0; i < formData.breaks.length; i++) {
         if (i !== idx && areRangesOverlapping(b, formData.breaks[i])) {
           newErrors[`break-${idx}-overlap`] = "Breaks cannot overlap"
           break
         }
       }
-
       for (const l of formData.lunch) {
         if (areRangesOverlapping(b, l)) {
           newErrors[`break-${idx}-lunch`] = "Break time and Lunch time should not overlap."
@@ -217,14 +175,12 @@ export default function ShiftFormModal({
       if (timeToMinutes(l.start) >= timeToMinutes(l.end)) {
         newErrors[`lunch-${idx}-range`] = "Lunch end must be after start"
       }
-
       for (let i = 0; i < formData.lunch.length; i++) {
         if (i !== idx && areRangesOverlapping(l, formData.lunch[i])) {
           newErrors[`lunch-${idx}-overlap`] = "Lunch periods cannot overlap"
           break
         }
       }
-
       for (const b of formData.breaks) {
         if (areRangesOverlapping(l, b)) {
           newErrors[`lunch-${idx}-break`] = "Break time and Lunch time should not overlap."
@@ -237,23 +193,14 @@ export default function ShiftFormModal({
       newErrors.gracePeriod = "Grace period cannot be negative"
     }
 
-    if (Object.keys(newErrors).length > 0) {
-      console.log("[v0] Validation errors found:", newErrors)
-    } else {
-      console.log("[v0] All validations passed")
-    }
-
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
 
   const formatTimeTo12Hour = (time: string): string => {
-    // If time already includes AM/PM, return as-is (backend sends 12-hour format)
     if (time.toLowerCase().includes("am") || time.toLowerCase().includes("pm")) {
       return time.toUpperCase()
     }
-
-    // Otherwise convert from 24-hour format
     const [hours, minutes] = time.split(":").map(Number)
     const period = hours >= 12 ? "PM" : "AM"
     const displayHours = hours % 12 || 12
@@ -262,14 +209,7 @@ export default function ShiftFormModal({
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault()
-    console.log("[v0] handleSubmit called, formData:", formData)
-
-    if (!validateForm()) {
-      console.log("[v0] Validation failed, not proceeding")
-      return
-    }
-
-    console.log("[v0] Validation passed, showing confirmation")
+    if (!validateForm()) return
 
     if (initialShift) {
       const hasDataChanged =
@@ -289,17 +229,12 @@ export default function ShiftFormModal({
           lunch: initialShift.lunch,
           gracePeriod: initialShift.gracePeriod,
         })
-
       console.log("[v0] hasDataChanged:", hasDataChanged)
-
-      if (!hasDataChanged) {
-        console.log("[v0] No data has changed, showing confirmation anyway (form allows update of unchanged data)")
-      }
     }
 
     const newShift: Shift = {
       ...formData,
-      id: initialShift?.id || String(Date.now()), // Store numeric ID as string without prefix
+      id: initialShift?.id || String(Date.now()),
       totalHours: Number.parseFloat(
         (calculateTotalMinutes(formData.startTime, formData.endTime) -
           formData.breaks.reduce((sum, b) => sum + calculateTotalMinutes(b.start, b.end), 0) -
@@ -310,40 +245,31 @@ export default function ShiftFormModal({
     newShift.breaks = [...formData.breaks].sort((a, b) => a.start.localeCompare(b.start))
     newShift.lunch = [...formData.lunch].sort((a, b) => a.start.localeCompare(b.start))
 
-    console.log("[v0] Setting showConfirm to true")
     setShowConfirm(true)
   }
 
   const handleConfirmUpdate = async () => {
-    console.log("[v0] handleConfirmUpdate called")
-    console.log("[v0] initialShift:", initialShift)
-    console.log("[v0] formData:", formData)
-
     const isDuplicateTimeRange = existingShiftCombinations.some(
       (combo) =>
         combo.startTime === formData.startTime && combo.endTime === formData.endTime && combo.id !== initialShift?.id,
     )
-
-    console.log("[v0] isDuplicateTimeRange:", isDuplicateTimeRange)
 
     if (isDuplicateTimeRange) {
       const existingShift = existingShiftCombinations.find(
         (combo) =>
           combo.startTime === formData.startTime && combo.endTime === formData.endTime && combo.id !== initialShift?.id,
       )
-      console.log("[v0] Duplicate found, setting error")
       setTimeRangeError(`A shift already exists with the same start and end time: ${existingShift?.name}`)
       setShowConfirm(false)
       return
     }
 
-    console.log("[v0] Calling onSave")
-    if (initialShift) {
-      const totalMinutes =
-        calculateTotalMinutes(formData.startTime, formData.endTime) -
-        formData.breaks.reduce((sum, b) => sum + calculateTotalMinutes(b.start, b.end), 0) -
-        formData.lunch.reduce((sum, l) => sum + calculateTotalMinutes(l.start, l.end), 0)
+    const totalMinutes =
+      calculateTotalMinutes(formData.startTime, formData.endTime) -
+      formData.breaks.reduce((sum, b) => sum + calculateTotalMinutes(b.start, b.end), 0) -
+      formData.lunch.reduce((sum, l) => sum + calculateTotalMinutes(l.start, l.end), 0)
 
+    if (initialShift) {
       onSave({
         ...formData,
         id: initialShift.id,
@@ -354,11 +280,6 @@ export default function ShiftFormModal({
         lunch: [...formData.lunch].sort((a, b) => a.start.localeCompare(b.start)),
       } as Shift)
     } else {
-      const totalMinutes =
-        calculateTotalMinutes(formData.startTime, formData.endTime) -
-        formData.breaks.reduce((sum, b) => sum + calculateTotalMinutes(b.start, b.end), 0) -
-        formData.lunch.reduce((sum, l) => sum + calculateTotalMinutes(l.start, l.end), 0)
-
       onSave({
         ...formData,
         totalHours: Number.parseFloat((totalMinutes / 60).toFixed(2)),
@@ -368,22 +289,16 @@ export default function ShiftFormModal({
         lunch: [...formData.lunch].sort((a, b) => a.start.localeCompare(b.start)),
       })
     }
-    console.log("[v0] onSave called, closing confirm")
+
     setShowConfirm(false)
   }
 
   const addBreak = () => {
-    setFormData((prev) => ({
-      ...prev,
-      breaks: [...prev.breaks, { start: "10:00", end: "10:15" }],
-    }))
+    setFormData((prev) => ({ ...prev, breaks: [...prev.breaks, { start: "10:00", end: "10:15" }] }))
   }
 
   const removeBreak = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      breaks: prev.breaks.filter((_, i) => i !== index),
-    }))
+    setFormData((prev) => ({ ...prev, breaks: prev.breaks.filter((_, i) => i !== index) }))
   }
 
   const updateBreak = (index: number, field: "start" | "end", value: string) => {
@@ -394,17 +309,11 @@ export default function ShiftFormModal({
   }
 
   const addLunch = () => {
-    setFormData((prev) => ({
-      ...prev,
-      lunch: [...prev.lunch, { start: "12:00", end: "13:00" }],
-    }))
+    setFormData((prev) => ({ ...prev, lunch: [...prev.lunch, { start: "12:00", end: "13:00" }] }))
   }
 
   const removeLunch = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      lunch: prev.lunch.filter((_, i) => i !== index),
-    }))
+    setFormData((prev) => ({ ...prev, lunch: prev.lunch.filter((_, i) => i !== index) }))
   }
 
   const updateLunch = (index: number, field: "start" | "end", value: string) => {
@@ -416,7 +325,6 @@ export default function ShiftFormModal({
 
   const handleDurationChange = (type: "hours" | "minutes", value: string) => {
     allowDurationAutoCalc.current = true
-
     if (type === "hours") {
       setDurationHours(Number.parseInt(value))
     } else {
@@ -498,7 +406,6 @@ export default function ShiftFormModal({
           </button>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6 pb-20 sm:pb-6">
           {/* Shift Name */}
           <div>
@@ -513,14 +420,11 @@ export default function ShiftFormModal({
               value={formData.name}
               onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
               placeholder="e.g., Morning Shift, Evening Shift"
-              className={`${errors.name ? "border-destructive" : ""} ${initialShift ? "dark:text-black-100 dark:text-gray-100 font-semibold" : ""}`}
-              disabled={viewMode || !!initialShift}
-              readOnly={viewMode || !!initialShift}
+              className={errors.name ? "border-destructive" : ""}
+              disabled={viewMode}
+              readOnly={viewMode}
             />
             {errors.name && <p className="text-xs text-destructive mt-1">{errors.name}</p>}
-            {initialShift && (
-              <p className="text-xs text-muted-foreground mt-1">Shift name cannot be changed when editing</p>
-            )}
           </div>
 
           {/* Start Time and Shift Duration */}
@@ -534,9 +438,7 @@ export default function ShiftFormModal({
               </label>
               <TimePickerCompact
                 value={formData.startTime}
-                onChange={(time) => {
-                  setFormData((prev) => ({ ...prev, startTime: time }))
-                }}
+                onChange={(time) => setFormData((prev) => ({ ...prev, startTime: time }))}
                 disabled={viewMode}
               />
             </div>
@@ -565,7 +467,6 @@ export default function ShiftFormModal({
                     ))}
                   </SelectContent>
                 </Select>
-
                 <Select
                   key={`duration-minutes-${durationMinutes}`}
                   value={durationMinutes.toString()}
@@ -643,9 +544,7 @@ export default function ShiftFormModal({
                           disabled={viewMode}
                         />
                       </div>
-                      {(errors[`break-${idx}-start`] ||
-                        errors[`break-${idx}-lunch`] ||
-                        errors[`break-${idx}-range`]) && (
+                      {(errors[`break-${idx}-start`] || errors[`break-${idx}-lunch`] || errors[`break-${idx}-range`]) && (
                         <p className="text-xs text-destructive mt-1">
                           {errors[`break-${idx}-start`] || errors[`break-${idx}-lunch`] || errors[`break-${idx}-range`]}
                         </p>
@@ -725,9 +624,7 @@ export default function ShiftFormModal({
                           disabled={viewMode}
                         />
                       </div>
-                      {(errors[`lunch-${idx}-start`] ||
-                        errors[`lunch-${idx}-break`] ||
-                        errors[`lunch-${idx}-range`]) && (
+                      {(errors[`lunch-${idx}-start`] || errors[`lunch-${idx}-break`] || errors[`lunch-${idx}-range`]) && (
                         <p className="text-xs text-destructive mt-1">
                           {errors[`lunch-${idx}-start`] || errors[`lunch-${idx}-break`] || errors[`lunch-${idx}-range`]}
                         </p>
@@ -792,10 +689,7 @@ export default function ShiftFormModal({
                 value={formData.gracePeriod.lateIn === 0 ? "0 mins" : `${formData.gracePeriod.lateIn} mins`}
                 onValueChange={(value) => {
                   const mins = Number.parseInt(value.split(" ")[0])
-                  setFormData((prev) => ({
-                    ...prev,
-                    gracePeriod: { lateIn: mins },
-                  }))
+                  setFormData((prev) => ({ ...prev, gracePeriod: { lateIn: mins } }))
                 }}
                 disabled={viewMode}
               >

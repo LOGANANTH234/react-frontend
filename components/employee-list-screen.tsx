@@ -70,7 +70,9 @@ const mapApiEmployeeToEmployee = (apiEmployee: any): Employee => {
 export default function EmployeeListScreen() {
   const cache = useEmployeeCache()
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [inactiveEmployees, setInactiveEmployees] = useState<Employee[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingInactive, setIsLoadingInactive] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | undefined>()
@@ -97,6 +99,7 @@ export default function EmployeeListScreen() {
   const [roleLabels, setRoleLabels] = useState<string[]>([])
   const [isLoadingRoles, setIsLoadingRoles] = useState(false)
 
+  // Fetch active employees on mount
   useEffect(() => {
     const fetchEmployees = async () => {
       if (cache.hasData) {
@@ -142,9 +145,17 @@ export default function EmployeeListScreen() {
     fetchEmployees()
   }, [cache.hasData])
 
+  // Fetch role labels on mount
   useEffect(() => {
     fetchRoleLabels()
   }, [])
+
+  // Fetch inactive employees whenever filterStatus switches to "Inactive"
+  useEffect(() => {
+    if (filterStatus === "Inactive") {
+      fetchInactiveEmployees()
+    }
+  }, [filterStatus])
 
   const fetchRoleLabels = async () => {
     setIsLoadingRoles(true)
@@ -166,7 +177,40 @@ export default function EmployeeListScreen() {
     }
   }
 
-  const filteredEmployees = employees.filter((emp) => {
+  const fetchInactiveEmployees = async () => {
+    setIsLoadingInactive(true)
+    try {
+      const token = localStorage.getItem("auth") ? JSON.parse(localStorage.getItem("auth")!).token : null
+      const response = await fetch("http://3.109.152.136:8080/api/employees/getAllInactiveEmployees", {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch inactive employees")
+      }
+
+      const data = await response.json()
+      setInactiveEmployees(data.map(mapApiEmployeeToEmployee))
+    } catch (err) {
+      console.error("Error fetching inactive employees:", err)
+      toast({
+        title: "Error",
+        description: "Failed to load inactive employees. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingInactive(false)
+    }
+  }
+
+  // Use the appropriate source list based on the selected status filter
+  const sourceEmployees = filterStatus === "Inactive" ? inactiveEmployees : employees
+
+  const filteredEmployees = sourceEmployees.filter((emp) => {
     const matchesSearch =
       emp.name.toLowerCase().startsWith(searchQuery.toLowerCase()) ||
       emp.phone.includes(searchQuery) ||
@@ -174,7 +218,10 @@ export default function EmployeeListScreen() {
 
     const matchesRole = filterRole === "All" || emp.role === filterRole
 
-    const matchesStatus = filterStatus === "All" || emp.status === filterStatus
+    // When "All" is selected we still use the active employees list but show all statuses
+    const matchesStatus = filterStatus === "All" || filterStatus === "Active" || filterStatus === "Inactive"
+      ? true
+      : emp.status === filterStatus
 
     const matchesPhoto =
       filterPhoto === "All" ||
@@ -195,7 +242,6 @@ export default function EmployeeListScreen() {
   }
 
   const handleSaveEmployee = async (employee: Employee) => {
-    // Update cache immediately without showing additional loader
     if (employee.id && employees.find((e) => e.id === employee.id)) {
       const updatedList = employees.map((e) => (e.id === employee.id ? employee : e))
       setEmployees(updatedList)
@@ -261,6 +307,11 @@ export default function EmployeeListScreen() {
       )
       setEmployees(updatedEmployees)
       cache.setEmployees(updatedEmployees)
+
+      // Also refresh inactive list if currently viewing inactive
+      if (filterStatus === "Inactive") {
+        fetchInactiveEmployees()
+      }
     } catch (err) {
       console.error("Error updating employee status:", err)
       setError("Failed to update employee status. Please try again.")
@@ -288,7 +339,6 @@ export default function EmployeeListScreen() {
       }
 
       const data = await response.json()
-      // Assuming the API returns an array of history records
       setHistoryEmployee({ ...employee, history: data })
     } catch (err) {
       console.error("Error fetching employee history:", err)
@@ -339,19 +389,11 @@ export default function EmployeeListScreen() {
       const addedEmployees = Object.keys(data.imageAddedEmployeeMap || {})
       const updatedEmployees = Object.keys(data.imageUpdatedEmployeeMap || {})
 
-      if (addedEmployees.length === 0 && updatedEmployees.length === 0) {
-        setSyncResults({
-          added: [],
-          updated: [],
-        })
-        setIsResultsModalOpen(true)
-      } else {
-        setSyncResults({
-          added: addedEmployees,
-          updated: updatedEmployees,
-        })
-        setIsResultsModalOpen(true)
-      }
+      setSyncResults({
+        added: addedEmployees,
+        updated: updatedEmployees,
+      })
+      setIsResultsModalOpen(true)
     } catch (err) {
       console.error("Error syncing photos:", err)
       toast({
@@ -504,12 +546,12 @@ export default function EmployeeListScreen() {
                 </SelectContent>
               </Select>
 
+              {/* Status filter — default: Active */}
               <Select value={filterStatus} onValueChange={setFilterStatus}>
                 <SelectTrigger className="sm:w-[140px] h-10 text-xs sm:text-sm border-blue-400 shadow-sm">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="All">All Status</SelectItem>
                   <SelectItem value="Active">Active</SelectItem>
                   <SelectItem value="Inactive">Inactive</SelectItem>
                 </SelectContent>
@@ -548,19 +590,28 @@ export default function EmployeeListScreen() {
               )}
             </div>
 
-            <EmployeeCardGrid
-              employees={filteredEmployees}
-              onEdit={handleEditEmployee}
-              onDelete={handleDeleteEmployee}
-              onStatusChange={handleStatusChange}
-              onViewHistory={handleViewHistory}
-              canEdit={canEditEmployee}
-              canDelete={canDeleteEmployee}
-              canInactive={canInactiveEmployee}
-              canView={canViewEmployee}
-              canUpdatePassword={canUpdatePassword}
-              canDeactivate={canDeactivateEmployee}
-            />
+            {/* Show a dedicated loader while fetching inactive employees */}
+            {isLoadingInactive ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
+                <p className="text-lg font-medium text-foreground">Loading inactive employees...</p>
+                <p className="text-sm text-muted-foreground mt-1">Please wait while we fetch the data</p>
+              </div>
+            ) : (
+              <EmployeeCardGrid
+                employees={filteredEmployees}
+                onEdit={handleEditEmployee}
+                onDelete={handleDeleteEmployee}
+                onStatusChange={handleStatusChange}
+                onViewHistory={handleViewHistory}
+                canEdit={canEditEmployee}
+                canDelete={canDeleteEmployee}
+                canInactive={canInactiveEmployee}
+                canView={canViewEmployee}
+                canUpdatePassword={canUpdatePassword}
+                canDeactivate={canDeactivateEmployee}
+              />
+            )}
           </>
         )}
       </div>

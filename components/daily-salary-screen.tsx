@@ -18,6 +18,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
+import { DailySalaryDrilldownModal } from "./daily-salary-drilldown-modal"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -83,6 +84,7 @@ export function DailySalaryScreen() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showGenerateDialog, setShowGenerateDialog] = useState(false)
+  const [drilldownRecord, setDrilldownRecord] = useState<DailySalaryRecord | null>(null)
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -325,7 +327,8 @@ export function DailySalaryScreen() {
                     return (
                       <tr
                         key={r.id}
-                        className="border-b border-gray-200 hover:bg-gray-50 transition-colors"
+                        onClick={() => setDrilldownRecord(r)}
+                        className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors"
                       >
                         <td className="px-5 py-3.5 font-medium text-gray-800 whitespace-nowrap border-r border-gray-300">
                           {r.employeeName}
@@ -441,6 +444,13 @@ export function DailySalaryScreen() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Salary Drilldown dialog ──────────────────────────────────────── */}
+      <DailySalaryDrilldownModal
+        record={drilldownRecord}
+        open={!!drilldownRecord}
+        onOpenChange={(open) => { if (!open) setDrilldownRecord(null) }}
+      />
 
     </div>
   )
